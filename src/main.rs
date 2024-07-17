@@ -171,19 +171,27 @@ fn sample_bitmap(n: usize, probability: f64) -> Vec<F> {
     bitmap
 }
 
-fn create_subset_bitmap(n: usize, bmap: &Vec<F>)-> Vec<F> {
+fn create_subset_bitmap(n: usize, bmap: &Vec<F>, probability: f64)-> Vec<F> {
+    let mut sub_map = Vec::with_capacity(n);
     let rng = &mut test_rng() ;
-    //generate a random start index
-    let start = rng.gen_range(0..n) ;
-    //generate a random length
-    let len = rng.gen_range(1..=(n-start)) ;
+    for i in 0..n {
+        if bmap[i] == F::from(0) {
+            sub_map.push(F::from(0)) ;
 
-    bmap[start..(start+len)].to_vec() 
+        }
+        else {
+            let bit = rng.gen_bool(probability) ;
+            sub_map.push(F::from(bit));
+        }
+
+    }
+
+    sub_map
 
 }
 
 fn main() {
-    let n = 32;
+    let n = 128;
     println!("n = {}", n);
 
     // -------------- sample one-time SRS ---------------
@@ -205,7 +213,7 @@ fn main() {
     //samples n-1 random bits
     let bitmap_com = sample_bitmap(n - 1, 0.9);
     //sample bitmap signer
-    let bitmap_signer = create_subset_bitmap(n, &bitmap_com) ;
+    let bitmap_signer = create_subset_bitmap(n - 1, &bitmap_com,0.9) ;
 
     let start = Instant::now();
     let π = prove(&params, &ak, &vk, &bitmap_com, &bitmap_signer);
@@ -369,8 +377,10 @@ fn prove(
     weights.push(F::from(0) - total_active_weight);
 
     let mut bitmap_signer = bitmap_signer.clone();
+    let mut bitmap_com = bitmap_com.clone() ;
     //bitmap's last element must be 1 for our scheme
     bitmap_signer.push(F::from(1));
+    bitmap_com.push(F::from(1));
 
     //compute all the scalars we will need in the prover
     let domain = Radix2EvaluationDomain::<F>::new(n as usize).unwrap();
