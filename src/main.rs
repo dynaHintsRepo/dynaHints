@@ -191,13 +191,16 @@ fn create_subset_bitmap(n: usize, bmap: &Vec<F>, probability: f64)-> Vec<F> {
 }
 
 fn main() {
-    let n = 128;
+    let n = 256;
     println!("n = {}", n);
 
     // -------------- sample one-time SRS ---------------
     //run KZG setup
     let rng = &mut test_rng();
+    let start = Instant::now();
     let params = KZG::setup(n, rng).expect("Setup failed");
+    let duration = start.elapsed();
+    println!("Time elapsed in KZG setup is: {:?}", duration);
 
     // -------------- sample universe specific values ---------------
     //sample random keys
@@ -207,7 +210,10 @@ fn main() {
 
     // -------------- perform universe setup ---------------
     //run universe setup
+    let start = Instant::now();
     let (vk, ak) = setup(n, &params, &weights, &sk);
+    let duration = start.elapsed();
+    println!("Time elapsed in setup is: {:?}", duration);
 
     // -------------- sample proof specific values ---------------
     //samples n-1 random bits
