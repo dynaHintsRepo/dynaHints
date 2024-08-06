@@ -94,6 +94,7 @@ struct Proof {
 
 /// Hint contains all material output by a party during the setup phase
 #[allow(dead_code)]
+#[derive(Clone)]
 struct Hint {
     /// index in the address book
     i: usize,
@@ -191,7 +192,7 @@ fn create_subset_bitmap(n: usize, bmap: &Vec<F>, probability: f64)-> Vec<F> {
 }
 
 fn main() {
-    let n = 256;
+    let n = 32;
     println!("n = {}", n);
 
     // -------------- sample one-time SRS ---------------
@@ -207,13 +208,16 @@ fn main() {
     let sk: Vec<F> = sample_secret_keys(n - 1);
     //sample random weights for each party
     let weights = sample_weights(n - 1);
+    //generate hints for all the parties
+    //let hint_i: Vec<Hint> = Vec::new() ;
+    let hint_i = setup(n, &params, &sk) ;
 
-    // -------------- perform universe setup ---------------
-    //run universe setup
+    // -------------- perform universe preprocess ---------------
+    //run universe preprocess
     let start = Instant::now();
-    let (vk, ak) = setup(n, &params, &weights, &sk);
+    let (vk, ak) = preprocess(n, &params, &weights, &hint_i);
     let duration = start.elapsed();
-    println!("Time elapsed in setup is: {:?}", duration);
+    println!("Time elapsed in preprocess is: {:?}", duration);
 
     // -------------- sample proof specific values ---------------
     //samples n-1 random bits
@@ -236,42 +240,70 @@ fn main() {
 fn setup(
     n: usize,
     params: &UniversalParams<Curve>,
-    w: &Vec<F>,
     sk: &Vec<F>
+) -> Vec<Hint> {
+    let mut sk = sk.clone() ;
+    sk.push(F::from(0));
+
+    let all_parties_setup = crossbeam::scope(|s| {
+        let mut threads = Vec::new();
+        for i in 0..n {
+            //et idx = i.clone();
+            //let n = n.clone();
+            let sk = sk[i];
+            let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+            threads.push(thread_i);
+        }
+
+        threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+    }).unwrap();
+    all_parties_setup 
+
+}
+
+
+
+fn preprocess(
+    n: usize,
+    params: &UniversalParams<Curve>,
+    w: &Vec<F>,
+    hint_i: &Vec<Hint>,
+    //sk: &Vec<F>
 ) -> (VerificationKey, AggregationKey)
 {
+    let parties_hints = hint_i.clone() ;
     let mut weights = w.clone();
-    let mut sk = sk.clone();
+    //let mut sk = sk.clone();
 
     //last element must be 0
-    sk.push(F::from(0));
+    //sk.push(F::from(0));
     weights.push(F::from(0));
 
     let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
     let w_of_x_com = KZG::commit_g1(&params, &w_of_x).unwrap();
 
-    //allocate space to collect setup material from all n-1 parties
+    //allocate space to collect preprocess material from all n-1 parties
     let mut qz_contributions : Vec<Vec<G1>> = vec![Default::default(); n];
     let mut qx_contributions : Vec<G1> = vec![Default::default(); n];
     let mut qx_mul_tau_contributions : Vec<G1> = vec![Default::default(); n];
     let mut pks : Vec<G1> = vec![Default::default(); n];
     let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
     
-    //collect the setup phase material from all parties
-    let all_parties_setup = crossbeam::scope(|s| {
-        let mut threads = Vec::new();
-        for i in 0..n {
-            let idx = i.clone();
-            let n = n.clone();
-            let sk = sk[idx];
-            let thread_i = s.spawn(move |_| hint_gen(&params, n, idx, &sk));
-            threads.push(thread_i);
-        }
+    //collect the preprocess phase material from all parties
+    // let all_parties_setup = crossbeam::scope(|s| {
+    //     let mut threads = Vec::new();
+    //     for i in 0..n {
+    //         //et idx = i.clone();
+    //         //let n = n.clone();
+    //         let sk = sk[i];
+    //         let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+    //         threads.push(thread_i);
+    //     }
 
-        threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-    }).unwrap();
+    //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+    // }).unwrap();
 
-    for hint in all_parties_setup {
+    for hint in parties_hints{
         //verify hint
         verify_hint(params, &hint);
         //extract necessary items for pre-processing
@@ -311,6 +343,7 @@ fn setup(
     (vp, pp)
 
 }
+
 
 //RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
 fn random_oracle(
