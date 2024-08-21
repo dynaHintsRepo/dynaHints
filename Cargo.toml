@@ -34,6 +34,9 @@ paste = { version = "1.0" }
 crossbeam = { version = "0.8.2" }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
 tracing-subscriber = { version = "0.2" }
+vrf = "0.2.4"
+hex = "0.3.2"
+rand_chacha = "0.3.1"
 
 [features]
 asm = [ "ark-ff/asm" ]

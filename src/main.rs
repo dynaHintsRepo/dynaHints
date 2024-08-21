@@ -1,6 +1,13 @@
 use std::time::Instant;
 
+use rand::SeedableRng;
 use sha2::{Digest, Sha256};
+use hex ;
+
+use vrf::openssl::{CipherSuite, ECVRF};
+use vrf::VRF;
+
+use rand_chacha ;
 
 use ark_serialize::CanonicalSerialize;
 use ark_ff::{Field, biginteger::BigInteger256};
@@ -192,8 +199,13 @@ fn create_subset_bitmap(n: usize, bmap: &Vec<F>, probability: f64)-> Vec<F> {
 }
 
 fn main() {
+    //universe size is n 
     let n = 32;
     println!("n = {}", n);
+
+    //committee size is c
+    let c = 4 ;
+    println!("c={}",c) ;
 
     // -------------- sample one-time SRS ---------------
     //run KZG setup
@@ -220,6 +232,41 @@ fn main() {
     println!("Time elapsed in preprocess is: {:?}", duration);
 
     // -------------- sample proof specific values ---------------
+    //using vrf c times to get c no of positions
+    for i in 0..c {
+
+    }
+    let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap() ;
+    let secret_key =
+        hex::decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721").unwrap();
+    let public_key = vrf.derive_public_key(&secret_key).unwrap();
+    let message: &[u8] = b"sample" ;
+
+    let pi = vrf.prove(&secret_key, &message).unwrap();
+    let hash = vrf.proof_to_hash(&pi).unwrap();
+
+
+
+    let beta = vrf.verify(&public_key, &pi, &message);
+    match beta {
+        Ok(beta) => {
+            println!("VRF proof is valid!\nHash output: {}, and size is : {}", hex::encode(&beta),beta.len());
+            assert_eq!(hash, beta);
+        }
+        Err(e) => {
+            println!("VRF proof is not valid: {}", e);
+        }
+    }
+
+    //putting the vrf value into aes
+    // let seed: &[u8] = &beta.unwrap() ;
+
+    // let mut rng_cha = rand_chacha::ChaCha12Rng::seed_from_u64(u64::from_be_bytes(seed[0..8].try_into().unwrap())) ;
+    // let committee_position = rng_cha.gen_range(1..n) ;
+    // println!("com_pos is: {}",committee_position) ;
+
+
+
     //samples n-1 random bits
     let bitmap_com = sample_bitmap(n - 1, 0.9);
     //sample bitmap signer
