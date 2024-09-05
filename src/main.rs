@@ -1,13 +1,19 @@
 use std::time::Instant;
 
-use rand::SeedableRng;
+//use rand::SeedableRng;
 use sha2::{Digest, Sha256};
 use hex ;
+use std::collections::HashSet;
 
 use vrf::openssl::{CipherSuite, ECVRF};
 use vrf::VRF;
 
-use rand_chacha ;
+//use rand_chacha ;
+
+use aes::Aes128;
+use aes::cipher::{BlockEncrypt, KeyInit,
+    generic_array::GenericArray,
+};
 
 use ark_serialize::CanonicalSerialize;
 use ark_ff::{Field, biginteger::BigInteger256};
@@ -144,6 +150,8 @@ struct AggregationKey {
 struct VerificationKey {
     /// the universe has n - 1 parties (where n is a power of 2)
     n: usize,
+    //the committee has c-1 parties 
+    c : usize,
     /// first G1 element from the KZG CRS (for zeroth power of tau)
     g_0: G1,
     /// first G2 element from the KZG CRS (for zeroth power of tau)
@@ -168,15 +176,63 @@ fn sample_weights(n: usize) -> Vec<F> {
 }
 
 /// n is the size of the bitmap, and probability is for true or 1.
-fn sample_bitmap(n: usize, probability: f64) -> Vec<F> {
-    let rng = &mut test_rng();
-    let mut bitmap = vec![];
-    for _i in 0..n {
-        //let r = u64::rand(&mut rng);
-        let bit = rng.gen_bool(probability);
-        bitmap.push(F::from(bit));
-    }
-    bitmap
+// fn sample_bitmap(n: usize, probability: f64) -> Vec<F> {
+//     let rng = &mut test_rng();
+//     let mut bitmap = vec![];
+//     for _i in 0..n {
+//         //let r = u64::rand(&mut rng);
+//         let bit = rng.gen_bool(probability);
+//         bitmap.push(F::from(bit));
+//     }
+//     bitmap
+// }
+
+fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>) -> Vec<F> {
+    
+ 
+     //putting the vrf output as key into aes
+     let mut result = HashSet::new();
+     let beta1 = &vrf_output.clone() ;
+     let key:[u8;16] = [beta1[0],beta1[1],beta1[2],beta1[3],beta1[4],
+                       beta1[5],beta1[6],beta1[7],beta1[8],beta1[9],
+                       beta1[10],beta1[11],beta1[12],beta1[13],beta1[14],
+                       beta1[15]] ;
+ 
+                       
+     let cipher = Aes128::new(&GenericArray::from_slice(&key));
+     
+ 
+     let mut counter: u128 = 0; // 128-bit counter
+ 
+     while result.len() < com_size {
+         let mut block = GenericArray::clone_from_slice(&counter.to_be_bytes());
+         //println!("create committee block is {:?}",block) ;
+         cipher.encrypt_block(&mut block);
+
+         //convert the block in to 128 bit 
+         let encrypted_value = u128::from_be_bytes(block.as_slice().try_into().expect("Incorrect length"));
+         //println!("create committee encrypted_value is {:?}",encrypted_value) ;
+         //map the encrypted value in the range of the universe size
+         let random_number = (encrypted_value % (universe_size as u128)) as u128 ;
+         result.insert(random_number as u32);
+         counter += 1;
+     }
+     let comm: Vec<u32> = result.into_iter().collect() ;
+     //println!("The positions are {:?}",comm) ;
+ 
+     let mut bitmap_com = Vec::with_capacity(universe_size) ;
+     for _i in 0..universe_size {
+         bitmap_com.push(F::from(0)) ;
+     }
+     for &value in &comm {
+         let temp = value as usize ;
+         if temp < universe_size-1 {
+             bitmap_com[temp] = F::from(1) ;
+         }    
+     }
+     bitmap_com
+     
+     
 }
 
 fn create_subset_bitmap(n: usize, bmap: &Vec<F>, probability: f64)-> Vec<F> {
@@ -198,13 +254,83 @@ fn create_subset_bitmap(n: usize, bmap: &Vec<F>, probability: f64)-> Vec<F> {
 
 }
 
+fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_instan: &mut ECVRF,vrf_message: &[u8], vrf_proof: &Vec<u8>, vrf_pk: &Vec<u8>,params: &UniversalParams<Curve>) {
+    //let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap() ;
+    //let message = vrf_message.clone() ;
+    //let bitmap_committee = b_com.clone() ;
+    let pi = vrf_proof.clone() ;
+    let pk = vrf_pk.clone() ;
+    let hash = vrf_instan.proof_to_hash(&pi).unwrap();
+    //println!("verify committee hash is {:?}",hash) ;
+    let beta = vrf_instan.verify(&pk, &pi, &vrf_message);
+    match beta.as_ref() {
+        Ok(beta) => {
+            println!("VRF proof is valid!");
+            assert_eq!(&hash, beta);
+        }
+        Err(e) => {
+            println!("VRF proof is not valid: {}", e);
+        }
+    }
+    let mut result = HashSet::new();
+   
+     let beta1 = &beta.unwrap().clone() ;
+     let key:[u8;16] = [beta1[0],beta1[1],beta1[2],beta1[3],beta1[4],
+                       beta1[5],beta1[6],beta1[7],beta1[8],beta1[9],
+                       beta1[10],beta1[11],beta1[12],beta1[13],beta1[14],
+                       beta1[15]] ;
+ 
+                       
+     let cipher = Aes128::new(&GenericArray::from_slice(&key));
+ 
+     let mut counter: u128 = 0; // 128-bit counter
+ 
+     while result.len() < com_size {
+         let mut block = GenericArray::clone_from_slice(&counter.to_be_bytes());
+         //println!("verify committee block is {:?}",block) ;
+         cipher.encrypt_block(&mut block);
+         //convert the block in to 128 bit 
+         let encrypted_value = u128::from_be_bytes(block.as_slice().try_into().expect("Incorrect length"));
+         //println!("verify committee encrypted_value is {:?}",encrypted_value) ;
+         //map the encrypted value in the range of the universe size
+         let random_number = (encrypted_value % (universe_size as u128)) as u128 ;
+         result.insert(random_number as u32);
+         counter += 1;
+     }
+     let comm: Vec<u32> = result.into_iter().collect() ;
+     //println!("The positions are {:?}",comm) ;
+ 
+     let mut bitmap_com = Vec::with_capacity(universe_size) ;
+     for _i in 0..universe_size {
+         bitmap_com.push(F::from(0)) ;
+     }
+     for &value in &comm {
+         let temp = value as usize ;
+         if temp < universe_size-1 {
+             bitmap_com[temp] = F::from(1) ;
+         }    
+     }
+     bitmap_com.push(F::from(1));
+     let bitmap_com_of_x = utils::interpolate_poly_over_mult_subgroup(&bitmap_com);
+     let bitmap_com_of_tau = KZG::commit_g1(&params, &bitmap_com_of_x).unwrap() ;
+     assert_eq!(bitmap_com_of_tau , b_com_of_tau) ;
+     //assert_eq!(bitmap_com, bitmap_committee) ;
+    //  if bitmap_com == bitmap_committee {
+    //     true
+    //  }
+    //  else {
+    //     false    
+    //  }
+    
+}
+
 fn main() {
     //universe size is n 
-    let n = 32;
+    let n = 128;
     println!("n = {}", n);
 
     //committee size is c
-    let c = 4 ;
+    let c = 8 ;
     println!("c={}",c) ;
 
     // -------------- sample one-time SRS ---------------
@@ -222,41 +348,43 @@ fn main() {
     let weights = sample_weights(n - 1);
     //generate hints for all the parties
     //let hint_i: Vec<Hint> = Vec::new() ;
+    let start = Instant::now();
     let hint_i = setup(n, &params, &sk) ;
+    let duration = start.elapsed();
+    println!("Time elapsed in setup is: {:?}", duration);
 
     // -------------- perform universe preprocess ---------------
     //run universe preprocess
     let start = Instant::now();
-    let (vk, ak) = preprocess(n, &params, &weights, &hint_i);
+    let (vk, ak) = preprocess(n,c, &params, &weights, &hint_i);
     let duration = start.elapsed();
     println!("Time elapsed in preprocess is: {:?}", duration);
 
     // -------------- sample proof specific values ---------------
-    //using vrf c times to get c no of positions
-    for i in 0..c {
-
-    }
+    //have to use PRF to get c no of positions and also look for repititions
     let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap() ;
     let secret_key =
         hex::decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721").unwrap();
     let public_key = vrf.derive_public_key(&secret_key).unwrap();
-    let message: &[u8] = b"sample" ;
-
+    let message: &[u8] = b"samplec" ;
     let pi = vrf.prove(&secret_key, &message).unwrap();
-    let hash = vrf.proof_to_hash(&pi).unwrap();
+    //let hash = vrf.proof_to_hash(&pi).unwrap();
+    //println!("create committee hash is {:?}",hash) ;
+     let beta = vrf.verify(&public_key, &pi, &message);
 
+   
 
-
-    let beta = vrf.verify(&public_key, &pi, &message);
-    match beta {
-        Ok(beta) => {
-            println!("VRF proof is valid!\nHash output: {}, and size is : {}", hex::encode(&beta),beta.len());
-            assert_eq!(hash, beta);
-        }
-        Err(e) => {
-            println!("VRF proof is not valid: {}", e);
-        }
-    }
+   
+   
+    // match beta {
+    //     Ok(beta) => {
+    //         println!("VRF proof is valid!\nHash output: {}, and size is : {}", hex::encode(&beta),beta.len());
+    //         assert_eq!(hash, beta);
+    //     }
+    //     Err(e) => {
+    //         println!("VRF proof is not valid: {}", e);
+    //     }
+    // }
 
     //putting the vrf value into aes
     // let seed: &[u8] = &beta.unwrap() ;
@@ -268,8 +396,9 @@ fn main() {
 
 
     //samples n-1 random bits
-    let bitmap_com = sample_bitmap(n - 1, 0.9);
+    //let bitmap_com = sample_bitmap(n - 1, 0.9);
     //sample bitmap signer
+    let bitmap_com = create_committee(c, n-1, &beta.unwrap()) ;
     let bitmap_signer = create_subset_bitmap(n - 1, &bitmap_com,0.9) ;
 
     let start = Instant::now();
@@ -279,7 +408,7 @@ fn main() {
     
 
     let start = Instant::now();
-    verify(&vk, &π);
+    verify(&vk, &π,&mut vrf,&message, &pi, &public_key,&params);
     let duration = start.elapsed();
     println!("Time elapsed in verifier is: {:?}", duration);
 }
@@ -312,6 +441,7 @@ fn setup(
 
 fn preprocess(
     n: usize,
+    c: usize,
     params: &UniversalParams<Curve>,
     w: &Vec<F>,
     hint_i: &Vec<Hint>,
@@ -349,7 +479,7 @@ fn preprocess(
 
     //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
     // }).unwrap();
-
+    let start = Instant::now() ;
     for hint in parties_hints{
         //verify hint
         verify_hint(params, &hint);
@@ -360,13 +490,17 @@ fn preprocess(
         pks[hint.i] = hint.pk_i.clone();
         sk_l_of_tau_coms[hint.i] = hint.sk_i_l_i_of_tau_com_2.clone();
     }
-
+    let duration = start.elapsed();
+    println!("Time elapsed in verifying the hints is: {:?}", duration);
+ 
+    let start = Instant::now() ;
     let z_of_x = utils::compute_vanishing_poly(n);
     let x_monomial = utils::compute_x_monomial();
     let l_n_minus_1_of_x = utils::lagrange_poly(n, n-1);
 
     let vp = VerificationKey {
         n: n,
+        c: c,
         g_0: params.powers_of_g[0].clone(),
         h_0: params.powers_of_h[0].clone(),
         h_1: params.powers_of_h[1].clone(),
@@ -386,6 +520,9 @@ fn preprocess(
         qx_terms: qx_contributions,
         qx_mul_tau_terms: qx_mul_tau_contributions,
     };
+    let duration = start.elapsed();
+    println!("Time elapsed in computing vp and pp is: {:?}", duration);
+ 
 
     (vp, pp)
 
@@ -646,7 +783,9 @@ fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F) {
         &π.opening_proof_r_div_ω);
 }
 
-fn verify(vp: &VerificationKey, π: &Proof) {
+fn verify(vp: &VerificationKey, π: &Proof,vrf_instan: &mut ECVRF, vrf_message: &[u8], vrf_proof: &Vec<u8>, vrf_pk: &Vec<u8>,params: &UniversalParams<Curve>) {
+    verify_committee(vp.c, vp.n-1, π.b_committee_of_tau,vrf_instan, vrf_message, vrf_proof, vrf_pk,params) ;
+
     // compute root of unity
     let domain = Radix2EvaluationDomain::<F>::new(vp.n as usize).unwrap();
     let ω: F = domain.group_gen;
