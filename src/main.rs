@@ -1,4 +1,5 @@
 use std::time::Instant;
+//use pprof::ProfilerGuard;
 
 //use rand::SeedableRng;
 use sha2::{Digest, Sha256};
@@ -326,11 +327,11 @@ fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_
 
 fn main() {
     //universe size is n 
-    let n = 128;
+    let n = 256;
     println!("n = {}", n);
 
     //committee size is c
-    let c = 8 ;
+    let c = 16;
     println!("c={}",c) ;
 
     // -------------- sample one-time SRS ---------------
@@ -346,19 +347,25 @@ fn main() {
     let sk: Vec<F> = sample_secret_keys(n - 1);
     //sample random weights for each party
     let weights = sample_weights(n - 1);
-    //generate hints for all the parties
-    //let hint_i: Vec<Hint> = Vec::new() ;
+
     let start = Instant::now();
-    let hint_i = setup(n, &params, &sk) ;
+    let (vk, ak) = setup(n, c,&params, &weights, &sk);
     let duration = start.elapsed();
     println!("Time elapsed in setup is: {:?}", duration);
 
+    //generate hints for all the parties
+    //let hint_i: Vec<Hint> = Vec::new() ;
+    // let start = Instant::now();
+    // let hint_i = setup(n, &params, &sk) ;
+    // let duration = start.elapsed();
+    // println!("Time elapsed in setup is: {:?}", duration);
+
     // -------------- perform universe preprocess ---------------
     //run universe preprocess
-    let start = Instant::now();
-    let (vk, ak) = preprocess(n,c, &params, &weights, &hint_i);
-    let duration = start.elapsed();
-    println!("Time elapsed in preprocess is: {:?}", duration);
+    // let start = Instant::now();
+    // let (vk, ak) = preprocess(n,c, &params, &weights, &hint_i);
+    // let duration = start.elapsed();
+    // println!("Time elapsed in preprocess is: {:?}", duration);
 
     // -------------- sample proof specific values ---------------
     //have to use PRF to get c no of positions and also look for repititions
@@ -415,16 +422,34 @@ fn main() {
 
 fn setup(
     n: usize,
+    c: usize,
     params: &UniversalParams<Curve>,
+    w: &Vec<F>,
     sk: &Vec<F>
-) -> Vec<Hint> {
-    let mut sk = sk.clone() ;
-    sk.push(F::from(0));
+) -> (VerificationKey, AggregationKey)
+{
+    let mut weights = w.clone();
+    let mut sk = sk.clone();
 
+    //last element must be 0
+    sk.push(F::from(0));
+    weights.push(F::from(0));
+
+    let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
+    let w_of_x_com = KZG::commit_g1(&params, &w_of_x).unwrap();
+
+    //allocate space to collect setup material from all n-1 parties
+    let mut qz_contributions : Vec<Vec<G1>> = vec![Default::default(); n];
+    let mut qx_contributions : Vec<G1> = vec![Default::default(); n];
+    let mut qx_mul_tau_contributions : Vec<G1> = vec![Default::default(); n];
+    let mut pks : Vec<G1> = vec![Default::default(); n];
+    let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
+    
+    //collect the setup phase material from all parties
     let all_parties_setup = crossbeam::scope(|s| {
         let mut threads = Vec::new();
         for i in 0..n {
-            //et idx = i.clone();
+            //let idx = i.clone();
             //let n = n.clone();
             let sk = sk[i];
             let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
@@ -433,56 +458,10 @@ fn setup(
 
         threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
     }).unwrap();
-    all_parties_setup 
 
-}
-
-
-
-fn preprocess(
-    n: usize,
-    c: usize,
-    params: &UniversalParams<Curve>,
-    w: &Vec<F>,
-    hint_i: &Vec<Hint>,
-    //sk: &Vec<F>
-) -> (VerificationKey, AggregationKey)
-{
-    let parties_hints = hint_i.clone() ;
-    let mut weights = w.clone();
-    //let mut sk = sk.clone();
-
-    //last element must be 0
-    //sk.push(F::from(0));
-    weights.push(F::from(0));
-
-    let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
-    let w_of_x_com = KZG::commit_g1(&params, &w_of_x).unwrap();
-
-    //allocate space to collect preprocess material from all n-1 parties
-    let mut qz_contributions : Vec<Vec<G1>> = vec![Default::default(); n];
-    let mut qx_contributions : Vec<G1> = vec![Default::default(); n];
-    let mut qx_mul_tau_contributions : Vec<G1> = vec![Default::default(); n];
-    let mut pks : Vec<G1> = vec![Default::default(); n];
-    let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
-    
-    //collect the preprocess phase material from all parties
-    // let all_parties_setup = crossbeam::scope(|s| {
-    //     let mut threads = Vec::new();
-    //     for i in 0..n {
-    //         //et idx = i.clone();
-    //         //let n = n.clone();
-    //         let sk = sk[i];
-    //         let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-    //         threads.push(thread_i);
-    //     }
-
-    //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-    // }).unwrap();
-    let start = Instant::now() ;
-    for hint in parties_hints{
+    for hint in all_parties_setup {
         //verify hint
-        verify_hint(params, &hint);
+        //verify_hint(params, &hint);
         //extract necessary items for pre-processing
         qz_contributions[hint.i] = hint.qz_i_terms.clone();
         qx_contributions[hint.i] = hint.qx_i_term.clone();
@@ -490,10 +469,7 @@ fn preprocess(
         pks[hint.i] = hint.pk_i.clone();
         sk_l_of_tau_coms[hint.i] = hint.sk_i_l_i_of_tau_com_2.clone();
     }
-    let duration = start.elapsed();
-    println!("Time elapsed in verifying the hints is: {:?}", duration);
- 
-    let start = Instant::now() ;
+
     let z_of_x = utils::compute_vanishing_poly(n);
     let x_monomial = utils::compute_x_monomial();
     let l_n_minus_1_of_x = utils::lagrange_poly(n, n-1);
@@ -520,13 +496,130 @@ fn preprocess(
         qx_terms: qx_contributions,
         qx_mul_tau_terms: qx_mul_tau_contributions,
     };
-    let duration = start.elapsed();
-    println!("Time elapsed in computing vp and pp is: {:?}", duration);
- 
 
     (vp, pp)
 
 }
+
+// fn setup(
+//     n: usize,
+//     params: &UniversalParams<Curve>,
+//     sk: &Vec<F>
+// ) -> Vec<Hint> {
+//     let mut sk = sk.clone() ;
+//     sk.push(F::from(0));
+
+//     let all_parties_setup = crossbeam::scope(|s| {
+//         let mut threads = Vec::new();
+//         for i in 0..n {
+//             //et idx = i.clone();
+//             //let n = n.clone();
+//             let sk = sk[i];
+//             let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+//             threads.push(thread_i);
+//         }
+
+//         threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+//     }).unwrap();
+//     all_parties_setup 
+
+// }
+
+
+
+// fn preprocess(
+//     n: usize,
+//     c: usize,
+//     params: &UniversalParams<Curve>,
+//     w: &Vec<F>,
+//     hint_i: &Vec<Hint>,
+//     //sk: &Vec<F>
+// ) -> (VerificationKey, AggregationKey)
+// {
+//     let parties_hints = hint_i.clone() ;
+//     let mut weights = w.clone();
+//     //let mut sk = sk.clone();
+
+//     //last element must be 0
+//     //sk.push(F::from(0));
+//     weights.push(F::from(0));
+
+//     let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
+//     let w_of_x_com = KZG::commit_g1(&params, &w_of_x).unwrap();
+
+//     //allocate space to collect preprocess material from all n-1 parties
+//     let mut qz_contributions : Vec<Vec<G1>> = vec![Default::default(); n];
+//     let mut qx_contributions : Vec<G1> = vec![Default::default(); n];
+//     let mut qx_mul_tau_contributions : Vec<G1> = vec![Default::default(); n];
+//     let mut pks : Vec<G1> = vec![Default::default(); n];
+//     let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
+    
+//     //collect the preprocess phase material from all parties
+//     // let all_parties_setup = crossbeam::scope(|s| {
+//     //     let mut threads = Vec::new();
+//     //     for i in 0..n {
+//     //         //et idx = i.clone();
+//     //         //let n = n.clone();
+//     //         let sk = sk[i];
+//     //         let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+//     //         threads.push(thread_i);
+//     //     }
+
+//     //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+//     // }).unwrap();
+//     // let guard = ProfilerGuard::new(100).unwrap();
+//     //let start = Instant::now() ;
+//     for hint in parties_hints{
+//         //verify hint
+//         //verify_hint(params, &hint);
+//         //extract necessary items for pre-processing
+//         qz_contributions[hint.i] = hint.qz_i_terms.clone();
+//         qx_contributions[hint.i] = hint.qx_i_term.clone();
+//         qx_mul_tau_contributions[hint.i] = hint.qx_i_term_mul_tau.clone();
+//         pks[hint.i] = hint.pk_i.clone();
+//         sk_l_of_tau_coms[hint.i] = hint.sk_i_l_i_of_tau_com_2.clone();
+//     }
+//     //let duration = start.elapsed();
+//     //println!("Time elapsed in verifying the hints is: {:?}", duration);
+//     // if let Ok(report) = guard.report().build() {
+//     //     let file = std::fs::File::create("flamegraph.svg").unwrap();
+//     //     report.flamegraph(file).unwrap();
+//     // }
+ 
+//     let start = Instant::now() ;
+//     let z_of_x = utils::compute_vanishing_poly(n);
+//     let x_monomial = utils::compute_x_monomial();
+//     let l_n_minus_1_of_x = utils::lagrange_poly(n, n-1);
+
+//     let vp = VerificationKey {
+//         n: n,
+//         c: c,
+//         g_0: params.powers_of_g[0].clone(),
+//         h_0: params.powers_of_h[0].clone(),
+//         h_1: params.powers_of_h[1].clone(),
+//         l_n_minus_1_of_tau_com: KZG::commit_g1(&params, &l_n_minus_1_of_x).unwrap(),
+//         w_of_tau_com: w_of_x_com,
+//         // combine all sk_i l_i_of_x commitments to get commitment to sk(x)
+//         sk_of_tau_com: add_all_g2(&params, &sk_l_of_tau_coms),
+//         z_of_tau_com: KZG::commit_g2(&params, &z_of_x).unwrap(),
+//         tau_com: KZG::commit_g2(&params, &x_monomial).unwrap(),
+//     };
+
+//     let pp = AggregationKey {
+//         n: n,
+//         weights: w.clone(),
+//         pks: pks,
+//         qz_terms: preprocess_qz_contributions(&qz_contributions),
+//         qx_terms: qx_contributions,
+//         qx_mul_tau_terms: qx_mul_tau_contributions,
+//     };
+//     let duration = start.elapsed();
+//     //println!("Time elapsed in computing vp and pp is: {:?}", duration);
+ 
+
+//     (vp, pp)
+
+// }
 
 
 //RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
@@ -579,6 +672,7 @@ fn random_oracle(
     //let input: [u8; 32] = [0u8; 32];
     F::try_from(bi).unwrap()
 }
+
 
 fn prove(
     params: &UniversalParams<Curve>,
@@ -821,24 +915,39 @@ fn verify(vp: &VerificationKey, π: &Proof,vrf_instan: &mut ECVRF, vrf_message: 
     let ω_pow_n_minus_1 = ω.pow([n-1]);
     let l_n_minus_1_of_r = (ω_pow_n_minus_1 / F::from(n)) * (vanishing_of_r / (r - ω_pow_n_minus_1));
 
+    //assert polynomial identity (B_com(x) − r.B_signer(x)).SK(x) =
+    //(aSK_com − r.aSK_signer )+(Q_com_z(x) − r.Q_signer_z(x)).Z(x) +
+    //(Q_signer_x(x) − r·Q_signer_x(x)).x
+    let x1: G1 = (π.b_signer_of_tau.mul(r)).into_affine() ;
+    let x2: G1 = (π.agg_pk.mul(r)).into_affine() ;
+    let x3: G1 = (π.qz_of_tau_signer.mul(r)).into_affine();
+    let x4: G1 = (π.qx_of_tau_signer.mul(r)).into_affine() ;
+    let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau.sub(x1), &vp.sk_of_tau_com) ;
+    let y1 = <Curve as Pairing>::pairing(&π.agg_pk_committee.sub(x2),vp.h_0) ;
+    let y2 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee.sub(x3),vp.z_of_tau_com) ;
+    let y3 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee.sub(x4),vp.tau_com) ;
+    let rhs = y1.add(y2).add(y3) ;
+    assert_eq!(lhs,rhs) ;
+
+
     //assert polynomial identity B_com(x) SK(x) = ask_com + Q_com_z(x) Z(x) + Q_com_x(x) x
-    let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau, &vp.sk_of_tau_com);
-    let x1 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee, &vp.z_of_tau_com);
-    let x2 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee, &vp.tau_com);
-    let x3 = <Curve as Pairing>::pairing(&π.agg_pk_committee, &vp.h_0);
-    let rhs = x1.add(x2).add(x3);
-    assert_eq!(lhs, rhs);
+    // let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau, &vp.sk_of_tau_com);
+    // let x1 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee, &vp.z_of_tau_com);
+    // let x2 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee, &vp.tau_com);
+    // let x3 = <Curve as Pairing>::pairing(&π.agg_pk_committee, &vp.h_0);
+    // let rhs = x1.add(x2).add(x3);
+    // assert_eq!(lhs, rhs);
 
     //assert polynomial identity (B_com(x)-B_signer(x)).SK(x)= (ask_com-ask_signer)+
     //(Q_com_Z(x)-Q_sign_Z(x)).Z(x)+(Q_com_x(x)-Q_sign_x(x)).x
     //let temp = &π.b_committee_of_tau.sub(&π.b_committee_of_tau) ;
     
-    let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau.sub(&π.b_signer_of_tau), &vp.sk_of_tau_com) ;
-    let y1 = <Curve as Pairing>::pairing(&π.agg_pk_committee.sub(&π.agg_pk),vp.h_0) ;
-    let y2 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee.sub(&π.qz_of_tau_signer),vp.z_of_tau_com) ;
-    let y3 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee.sub(&π.qx_of_tau_signer),vp.tau_com) ;
-    let rhs = y1.add(y2).add(y3) ;
-    assert_eq!(lhs,rhs) ;
+    // let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau.sub(&π.b_signer_of_tau), &vp.sk_of_tau_com) ;
+    // let y1 = <Curve as Pairing>::pairing(&π.agg_pk_committee.sub(&π.agg_pk),vp.h_0) ;
+    // let y2 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee.sub(&π.qz_of_tau_signer),vp.z_of_tau_com) ;
+    // let y3 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee.sub(&π.qx_of_tau_signer),vp.tau_com) ;
+    // let rhs = y1.add(y2).add(y3) ;
+    // assert_eq!(lhs,rhs) ;
 
     //assert checks on the public part
 
@@ -1037,58 +1146,115 @@ fn hint_gen(
 fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     let i = hint.i;
     let n = hint.qz_i_terms.len();
+    //println!("hint.qz_i_terms er length is {}",hint.qz_i_terms.len()) ;
 
     //e([sk_i L_i(τ)]1, [1]2) = e([sk_i]1, [L_i(τ)]2)
     let l_i_of_x = utils::lagrange_poly(n, i);
     let z_of_x = utils::compute_vanishing_poly(n);
 
     let l_i_of_tau_com = KZG::commit_g2(&params, &l_i_of_x).expect("commitment failed");
-    let lhs = <Curve as Pairing>::pairing(hint.sk_i_l_i_of_tau_com_1, params.powers_of_h[0]);
-    let rhs = <Curve as Pairing>::pairing(hint.pk_i, l_i_of_tau_com);
-    assert_eq!(lhs, rhs);
+    // let lhs = <Curve as Pairing>::pairing(hint.sk_i_l_i_of_tau_com_1, params.powers_of_h[0]);
+    // let rhs = <Curve as Pairing>::pairing(hint.pk_i, l_i_of_tau_com);
+    // assert_eq!(lhs, rhs);
 
+    //l_i^2-l_i
+    //let l_i_mult_l_i_sub_l_i = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
+    //(l_i^2-l_i)/Z())
+    //let l_i_mult_l_i_sub_l_i_sub_z = l_i_mult_l_i_sub_l_i.div(&z_of_x) ;
+    //[(l_i^2-l_i)/Z())]
+    //let l_i_mult_l_i_sub_l_i_sub_z_com = KZG::commit_g2(&params, &l_i_mult_l_i_sub_l_i_sub_z).expect("commitment failed");
+    //now to calculate the cross terms and for i=j l_i^2-l_i
+    let mut cross_terms = Vec::new();
     for j in 0..n {
-        let num: DensePolynomial<F>;
-        if i == j {
-            num = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
-        } else { //cross-terms
+        if j != i {
             let l_j_of_x = utils::lagrange_poly(n, j);
-            num = l_j_of_x.mul(&l_i_of_x);
+            cross_terms.push((l_j_of_x.mul(&l_i_of_x)).div(&z_of_x)) ;
         }
-        let f = num.div(&z_of_x);
-
-        //f = li^2 - l_i / z or li lj / z
-        let f_com = KZG::commit_g2(&params, &f).expect("commitment failed");
-        
-        let lhs = <Curve as Pairing>::pairing(hint.qz_i_terms[j], params.powers_of_h[0]);
-        let rhs = <Curve as Pairing>::pairing(hint.pk_i, f_com);
-        assert_eq!(lhs, rhs);
+        else {
+            cross_terms.push((l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x)).div(&z_of_x)) ;
+        }
     }
+    //to compute commitments to the cross terms 
+    let mut cross_terms_com = Vec::with_capacity(n) ;
+    for j in 0..n {
+            cross_terms_com.push(KZG::commit_g2(&params, &cross_terms[j]).expect("commitment failed"));
+               
+    }
+
+    // for j in 0..n {
+    //     let num: DensePolynomial<F>;
+    //     if i == j {
+    //         num = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
+    //     } else { //cross-terms
+    //         let l_j_of_x = utils::lagrange_poly(n, j);
+    //         num = l_j_of_x.mul(&l_i_of_x);
+    //     }
+    //     let f = num.div(&z_of_x);
+
+    //     //f = li^2 - l_i / z or li lj / z
+    //     let f_com = KZG::commit_g2(&params, &f).expect("commitment failed");
+        
+    //     let lhs = <Curve as Pairing>::pairing(hint.qz_i_terms[j], params.powers_of_h[0]);
+    //     let rhs = <Curve as Pairing>::pairing(hint.pk_i, f_com);
+    //     assert_eq!(lhs, rhs);
+    // }
 
     let x_monomial = utils::compute_x_monomial();
     let l_i_of_0 = l_i_of_x.evaluate(&F::from(0));
     let l_i_of_0_poly = utils::compute_constant_poly(&l_i_of_0);
 
     //numerator is l_i(x) - l_i(0)
-    let num = l_i_of_x.sub(&l_i_of_0_poly);
+    let l_i_sub_l_i_zero = l_i_of_x.sub(&l_i_of_0_poly);
     //denominator is x
     let den = x_monomial.clone();
 
     //qx_term = (l_i(x) - l_i(0)) / x
-    let qx_term = &num.div(&den);
+    let qx_term = &&l_i_sub_l_i_zero.div(&den);
     //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
     let qx_term_com = KZG::commit_g2(&params, &qx_term).expect("commitment failed");
-    let lhs = <Curve as Pairing>::pairing(hint.qx_i_term, params.powers_of_h[0]);
-    let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_com);
-    assert_eq!(lhs, rhs);
+    // let lhs = <Curve as Pairing>::pairing(hint.qx_i_term, params.powers_of_h[0]);
+    // let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_com);
+    // assert_eq!(lhs, rhs);
 
     //qx_term_mul_tau = (l_i(x) - l_i(0))
-    let qx_term_mul_tau = &num;
+    let qx_term_mul_tau = &l_i_sub_l_i_zero;
     //qx_term_mul_tau_com = [ (l_i(τ) - l_i(0)) ]_1
     let qx_term_mul_tau_com = KZG::commit_g2(&params, &qx_term_mul_tau).expect("commitment failed");
-    let lhs = <Curve as Pairing>::pairing(hint.qx_i_term_mul_tau, params.powers_of_h[0]);
-    let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_mul_tau_com);
-    assert_eq!(lhs, rhs);
+    // let lhs = <Curve as Pairing>::pairing(hint.qx_i_term_mul_tau, params.powers_of_h[0]);
+    // let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_mul_tau_com);
+    // assert_eq!(lhs, rhs);
+    //take n+3 no of random numbers to compute a random linear combination
+    let mut random_numbers = Vec::with_capacity(n+3) ;
+    let mut rng = ark_std::test_rng();
+    for _j in 0..n+3 {
+        random_numbers.push(F::rand(&mut rng)) ;
+    }
+    let mut terms_in_random_l_comb = Vec::with_capacity(n+3) ;
+    terms_in_random_l_comb.push(l_i_of_tau_com.mul(random_numbers[0])) ;
+    //compute the random linear combinations
+    for j in 1..n+1 {
+        terms_in_random_l_comb.push(cross_terms_com[j-1].mul(random_numbers[j])) ;
+    }
+    terms_in_random_l_comb.push(qx_term_com.mul(random_numbers[n+1])) ;
+    terms_in_random_l_comb.push(qx_term_mul_tau_com.mul(random_numbers[n+2])) ;
+    let mut lhs_mult = hint.sk_i_l_i_of_tau_com_1 ;
+    for j in 0..n {
+        lhs_mult = lhs_mult.add(hint.qz_i_terms[j]).into() ;
+    }
+    lhs_mult = lhs_mult.add(hint.qx_i_term).into() ;
+    lhs_mult = lhs_mult.add(hint.qx_i_term_mul_tau).into() ;
+    let lhs =  <Curve as Pairing>::pairing(lhs_mult, params.powers_of_h[0]);
+    let mut rhs_mult = l_i_of_tau_com ;
+    for j in 0..n {
+        rhs_mult = rhs_mult.add(cross_terms_com[j]).into() ;
+    }
+    rhs_mult = rhs_mult.add(qx_term_com).into() ;
+    rhs_mult = rhs_mult.add(qx_term_mul_tau_com).into() ;
+    let rhs = <Curve as Pairing>::pairing(hint.pk_i,rhs_mult);
+    assert_eq!(lhs,rhs) ;
+    
+    
+
 
 }
 

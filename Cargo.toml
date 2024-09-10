@@ -12,6 +12,7 @@ rust-version = "1.63"
 ################################# Dependencies ################################
 
 [dependencies]
+pprof = { version = "0.10", features = ["flamegraph"] }
 sha2 = "0.9"
 criterion = { version = "0.4.0", features = [ "html_reports" ] }
 ark-std = { version = "0.4.0" }
@@ -45,3 +46,5 @@ parallel = [ "ark-std/parallel", "ark-ff/parallel",  "ark-ec/parallel", ]
 
 [profile.dev]
 opt-level = 3
+  
+
