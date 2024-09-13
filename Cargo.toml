@@ -20,6 +20,7 @@ ark-ec = { version = "0.4.0" }
 ark-ff = { version = "0.4.0" }
 ark-poly = { version = "0.4.0" }
 ark-bls12-377 = { version = "0.4.0", default-features = false, features = [ "curve", "r1cs" ] }
+ark-bls12-381 = { version = "0.4.0", default-features = false, features = [ "curve"]}
 ark-serialize = { version = "^0.4.0", default-features = true }
 ark-crypto-primitives = { version = "^0.4.0", default-features = false, features = [ "r1cs", "crh", "merkle_tree" ] }
 ark-r1cs-std = { version = "0.4.0" }
@@ -29,6 +30,8 @@ ark-bw6-761 = { version = "0.4.0" }
 ark-relations = { version = "0.4.0" }
 ark-snark = { version = "0.4.0" }
 ark-groth16 = { version = "0.4.0" }
+bls_on_arkworks = "0.3.0"
+w3f-bls = "0.1.4"
 num-bigint = { version = "0.4.0", default-features = false }
 rand = "*"
 paste = { version = "1.0" }

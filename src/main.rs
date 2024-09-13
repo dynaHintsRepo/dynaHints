@@ -27,25 +27,37 @@ use ark_poly::{
 };
 use ark_std::rand::Rng;
 use ark_std::{UniformRand, test_rng, ops::*};
-use ark_bls12_377::Bls12_377;
+use ark_bls12_381::Bls12_381;
 use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_ec::VariableBaseMSM;
+
+use bls_on_arkworks as bls;
+
+//use w3f_bls::{Keypair,ZBLS,Message,Signed};
 
 use kzg::*;
 
 mod utils;
 mod kzg;
 
-type Curve = Bls12_377;
+type Curve = Bls12_381;
 type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
-type F = ark_bls12_377::Fr;
+type F = ark_bls12_381::Fr;
 type G1 = <Curve as Pairing>::G1Affine;
 type G2 = <Curve as Pairing>::G2Affine;
+
+///partial bls signature structure 
+struct PartialSig {
+    sigma: Vec<u8>,
+    i: usize,
+}
 
 /// hinTS proof structure
 struct Proof {
     /// aggregate public key (aPK_signer in the paper)
     agg_pk: G1,
+    ///aggregated signature
+    agg_sigma: G2,
     ///aggregate public key of the committee (aPK_com in the paper)
     agg_pk_committee: G1,
     /// aggregate weight (w in the paper)
@@ -325,9 +337,34 @@ fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_
     
 }
 
+fn partial_signatures_gen(universe_size: usize,sk: &Vec<F>,bitmap_signer: &Vec<F>,message: &Vec<u8>,dst: &Vec<u8>)-> Vec<PartialSig> {
+    let mut partial_sig_vec = vec![] ;
+    for i in 0..universe_size {
+        if bitmap_signer[i] == F::from(1) {
+            let p_sig = PartialSig {
+                sigma: bls::sign(sk[i], message, dst).unwrap(),
+                i: i,
+            } ;
+            partial_sig_vec.push(p_sig) ;
+
+        }
+
+    }
+    partial_sig_vec
+}
+
+fn partial_signatures_verification(partial_sig_vec: &Vec<PartialSig>,message: &Vec<u8>,dst: &Vec<u8>,pks: &Vec<G1>) {
+    for j in 0..partial_sig_vec.len() {
+        let p_sig = &partial_sig_vec[j] ;
+        let pk_in_vec = bls::point_to_pubkey(pks[p_sig.i]) ;
+        bls::verify(&pk_in_vec, message, &p_sig.sigma, dst) ;
+    }
+
+}
+
 fn main() {
     //universe size is n 
-    let n = 256;
+    let n = 32;
     println!("n = {}", n);
 
     //committee size is c
@@ -373,11 +410,11 @@ fn main() {
     let secret_key =
         hex::decode("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721").unwrap();
     let public_key = vrf.derive_public_key(&secret_key).unwrap();
-    let message: &[u8] = b"samplec" ;
-    let pi = vrf.prove(&secret_key, &message).unwrap();
+    let vrf_message: &[u8] = b"samplec" ;
+    let pi = vrf.prove(&secret_key, &vrf_message).unwrap();
     //let hash = vrf.proof_to_hash(&pi).unwrap();
     //println!("create committee hash is {:?}",hash) ;
-     let beta = vrf.verify(&public_key, &pi, &message);
+     let beta = vrf.verify(&public_key, &pi, &vrf_message);
 
    
 
@@ -408,14 +445,21 @@ fn main() {
     let bitmap_com = create_committee(c, n-1, &beta.unwrap()) ;
     let bitmap_signer = create_subset_bitmap(n - 1, &bitmap_com,0.9) ;
 
+    let message = "message to sign".as_bytes().to_vec();
+    let dst = bls::DST_ETHEREUM.as_bytes().to_vec();
+
+    let sig_vec = partial_signatures_gen(n-1, &sk, &bitmap_signer, &message, &dst) ;
+
+
+
     let start = Instant::now();
-    let π = prove(&params, &ak, &vk, &bitmap_com, &bitmap_signer);
+    let π = prove(&params, &ak, &vk, &bitmap_com, &bitmap_signer,&sig_vec, &message, &dst);
     let duration = start.elapsed();
     println!("Time elapsed in prover is: {:?}", duration);
     
 
     let start = Instant::now();
-    verify(&vk, &π,&mut vrf,&message, &pi, &public_key,&params);
+    verify(&vk, &π, &message, &dst,&mut vrf,&vrf_message, &pi, &public_key,&params);
     let duration = start.elapsed();
     println!("Time elapsed in verifier is: {:?}", duration);
 }
@@ -679,7 +723,10 @@ fn prove(
     ak: &AggregationKey,
     vk: &VerificationKey,
     bitmap_com: &Vec<F>,
-    bitmap_signer: &Vec<F>) -> Proof {
+    bitmap_signer: &Vec<F>,
+    signature_vector: &Vec<PartialSig>,
+    message: &Vec<u8>,
+    dst: &Vec<u8>) -> Proof {
     // compute the nth root of unity
     let n = ak.n;
 
@@ -698,6 +745,9 @@ fn prove(
     //bitmap's last element must be 1 for our scheme
     bitmap_signer.push(F::from(1));
     bitmap_com.push(F::from(1));
+    //verify the partial signatures
+    partial_signatures_verification(signature_vector, message, dst, &ak.pks) ;
+    let agg_sigma = compute_agg_sig(signature_vector, n) ;
 
     //compute all the scalars we will need in the prover
     let domain = Radix2EvaluationDomain::<F>::new(n as usize).unwrap();
@@ -789,6 +839,7 @@ fn prove(
 
     Proof {
         agg_pk: agg_pk.clone(),
+        agg_sigma: agg_sigma.clone(),
         agg_pk_committee: agg_pk_committee.clone(),
         agg_weight: total_active_weight,
         
@@ -877,7 +928,7 @@ fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F) {
         &π.opening_proof_r_div_ω);
 }
 
-fn verify(vp: &VerificationKey, π: &Proof,vrf_instan: &mut ECVRF, vrf_message: &[u8], vrf_proof: &Vec<u8>, vrf_pk: &Vec<u8>,params: &UniversalParams<Curve>) {
+fn verify(vp: &VerificationKey, π: &Proof, message: &Vec<u8>, dst: &Vec<u8>,vrf_instan: &mut ECVRF, vrf_message: &[u8], vrf_proof: &Vec<u8>, vrf_pk: &Vec<u8>,params: &UniversalParams<Curve>) {
     verify_committee(vp.c, vp.n-1, π.b_committee_of_tau,vrf_instan, vrf_message, vrf_proof, vrf_pk,params) ;
 
     // compute root of unity
@@ -977,6 +1028,11 @@ fn verify(vp: &VerificationKey, π: &Proof,vrf_instan: &mut ECVRF, vrf_message: 
     let rhs = <Curve as Pairing>::pairing(&π.qx_of_tau_mul_tau_signer, &vp.h_0);
     assert_eq!(lhs, rhs);
 
+    //run the aggregated bls check 
+    let agg_pk = bls::point_to_pubkey(π.agg_pk) ;
+    let agg_sig = bls::point_to_signature(π.agg_sigma) ;
+    bls::verify(&agg_pk, message, &agg_sig, dst) ;
+
 }
 
 
@@ -996,6 +1052,25 @@ fn compute_apk(
 
     <<Curve as Pairing>::G1 as VariableBaseMSM>
         ::msm(&pp.pks[..], &exponents).unwrap().into_affine()
+}
+
+fn compute_agg_sig(
+    partial_sig_vec: &Vec<PartialSig>,
+    universe_size: usize,
+) -> G2 {
+    let mut exponents: Vec<F> = vec![];
+    let mut temp = vec![] ;
+    let n_inv = F::from(1) / F::from(universe_size as u64);
+    for i in 0..partial_sig_vec.len() {
+        exponents.push(n_inv) ;
+        temp.push(bls::signature_to_point(&partial_sig_vec[i].sigma).unwrap()) ;
+    }
+    
+
+
+    <<Curve as Pairing>::G2 as VariableBaseMSM>
+        ::msm(&temp[..], &exponents).unwrap().into_affine() 
+
 }
 
 fn preprocess_qz_contributions(
@@ -1142,7 +1217,7 @@ fn hint_gen(
         qx_i_term_mul_tau: qx_term_mul_tau_com,
     }
 }
-
+#[allow(dead_code)]
 fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     let i = hint.i;
     let n = hint.qz_i_terms.len();

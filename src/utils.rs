@@ -9,7 +9,7 @@ use ark_poly::{
     Evaluations
 };
 //use ark_std::{UniformRand, test_rng, ops::*};
-type F = ark_bls12_377::Fr;
+type F = ark_bls12_381::Fr;
 
 //returns t(X) = X^n - 1
 pub fn compute_vanishing_poly(n: usize) -> DensePolynomial<F> {
