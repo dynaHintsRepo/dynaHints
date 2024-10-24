@@ -980,14 +980,14 @@ fn prove(
         + psw_wff_q_of_r_proof.mul(r.pow([3]))
         + psw_check_q_of_r_proof.mul(r.pow([4]))
         + b_wff_q_of_r_proof.mul(r.pow([5]))
-        + b_check_q_of_r_proof.mul(r.pow([6]))).into() ;
-        // +psw_sub_of_r_proof.mul(r.pow([7]))
-        // + w_sub_of_r_proof.mul(r.pow([8]))
-        // + b_sub_of_r_proof.mul(r.pow([9]))
-        // + psw_sub_wff_q_of_r_proof.mul(r.pow([10]))
-        // + psw_sub_check_q_of_r_proof.mul(r.pow([11]))
-        // + b_sub_wff_q_of_r_proof.mul(r.pow([12]))
-        // + b_sub_check_q_of_r_proof.mul(r.pow([13]))).into();
+        + b_check_q_of_r_proof.mul(r.pow([6]))
+        +psw_sub_of_r_proof.mul(r.pow([7]))
+        + w_sub_of_r_proof.mul(r.pow([8]))
+        + b_sub_of_r_proof.mul(r.pow([9]))
+        + psw_sub_wff_q_of_r_proof.mul(r.pow([10]))
+        + psw_sub_check_q_of_r_proof.mul(r.pow([11]))
+        + b_sub_wff_q_of_r_proof.mul(r.pow([12]))
+        + b_sub_check_q_of_r_proof.mul(r.pow([13]))).into();
     
     let merged_proof_at_r_div_ω : G1= (psw_sub_of_r_div_ω_proof
         + psw_of_r_div_ω_proof.mul(r_div_ω.pow([1]))).into() ;
@@ -1030,10 +1030,10 @@ fn prove(
 
         parsum_sub_of_tau_com: parsum_sub_of_tau_com,
         b_sub_of_tau: b_sub_of_tau,
-        q1_sub_of_tau_com: q1_of_tau_com,
-        q3_sub_of_tau_com: q3_of_tau_com,
-        q2_sub_of_tau_com: q2_of_tau_com,
-        q4_sub_of_tau_com: q4_of_tau_com,
+        q1_sub_of_tau_com: q1_sub_of_tau_com,
+        q3_sub_of_tau_com: q3_sub_of_tau_com,
+        q2_sub_of_tau_com: q2_sub_of_tau_com,
+        q4_sub_of_tau_com: q4_sub_of_tau_com,
 
         qz_of_tau_signer: qz_com_signer,
         qx_of_tau_signer: qx_com_signer,
@@ -1092,14 +1092,14 @@ fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F, t: usize) {
         + psw_wff_q_of_r_argument.mul(r.pow([3]))
         + psw_check_q_of_r_argument.mul(r.pow([4]))
         + b_wff_q_of_r_argument.mul(r.pow([5]))
-        + b_check_q_of_r_argument.mul(r.pow([6]))).into() ;
-        // +psw_sub_of_r_argument.mul(r.pow([7]))
-        // + w_sub_of_r_argument.mul(r.pow([8]))
-        // + b_sub_of_r_argument.mul(r.pow([9]))
-        // + psw_sub_wff_q_of_r_argument.mul(r.pow([10]))
-        // + psw_sub_check_q_of_r_argument.mul(r.pow([11]))
-        // + b_sub_wff_q_of_r_argument.mul(r.pow([12]))
-        // + b_sub_check_q_of_r_argument.mul(r.pow([13]))).into_affine();
+        + b_check_q_of_r_argument.mul(r.pow([6]))
+        +psw_sub_of_r_argument.mul(r.pow([7]))
+        + w_sub_of_r_argument.mul(r.pow([8]))
+        + b_sub_of_r_argument.mul(r.pow([9]))
+        + psw_sub_wff_q_of_r_argument.mul(r.pow([10]))
+        + psw_sub_check_q_of_r_argument.mul(r.pow([11]))
+        + b_sub_wff_q_of_r_argument.mul(r.pow([12]))
+        + b_sub_check_q_of_r_argument.mul(r.pow([13]))).into_affine();
 
     let lhs = <Curve as Pairing>::pairing(
         merged_argument, 
