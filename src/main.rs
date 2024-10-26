@@ -25,13 +25,13 @@ use ark_poly::{
     Radix2EvaluationDomain,
     Evaluations
 };
-use ark_std::rand::Rng;
+//use ark_std::rand::Rng;
 use ark_std::{UniformRand, test_rng, ops::*};
 use ark_bls12_381::Bls12_381;
 use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_ec::VariableBaseMSM;
 
-use bls_on_arkworks as bls;
+use _bls_signature as bls;
 
 //use w3f_bls::{Keypair,ZBLS,Message,Signed};
 
@@ -39,7 +39,7 @@ use kzg::*;
 
 mod utils;
 mod kzg;
-//mod _bls_signature;
+mod _bls_signature;
 
 type Curve = Bls12_381;
 type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
@@ -49,7 +49,7 @@ type G2 = <Curve as Pairing>::G2Affine;
 
 ///partial bls signature structure 
 struct PartialSig {
-    sigma: Vec<u8>,
+    sigma: G2,
     i: usize,
 }
 
@@ -60,7 +60,7 @@ struct Proof {
     ///aggregated signature
     agg_sigma: G2,
     ///aggregate public key of the committee (aPK_com in the paper)
-    agg_pk_committee: G1,
+   // agg_pk_committee: G1,
     /// aggregate weight (w in the paper)
     agg_weight: F,
     ///..................//
@@ -68,11 +68,11 @@ struct Proof {
     ///commitment to the committee bit vector 
     b_committee_of_tau: G1,
     ///commitment to the Q_x_com 
-    qx_of_tau_committee: G1,
+    //qx_of_tau_committee: G1,
     ///committee to the Q_x_com.x 
-    qx_of_tau_mul_tau_committee: G1,
+   // qx_of_tau_mul_tau_committee: G1,
     /// commitment to the Q_Z_com
-    qz_of_tau_committee: G1,
+    //qz_of_tau_committee: G1,
     ///.....................///
     /// commitments regarding signers 
     /// commitment to the bitmap polynomial ([B(τ)]_1 in the paper)
@@ -380,7 +380,7 @@ fn partial_signatures_gen(universe_size: usize,sk: &Vec<F>,bitmap_signer: &Vec<F
     for i in 0..universe_size {
         if bitmap_signer[i] == F::from(1) {
             let p_sig = PartialSig {
-                sigma: bls::sign(sk[i], message, dst).unwrap(),
+                sigma: bls::bls_sign( message,sk[i], dst),
                 i: i,
             } ;
             partial_sig_vec.push(p_sig) ;
@@ -391,11 +391,10 @@ fn partial_signatures_gen(universe_size: usize,sk: &Vec<F>,bitmap_signer: &Vec<F
     partial_sig_vec
 }
 
-fn partial_signatures_verification(partial_sig_vec: &Vec<PartialSig>,message: &Vec<u8>,dst: &Vec<u8>,pks: &Vec<G1>) {
+fn partial_signatures_verification(partial_sig_vec: &Vec<PartialSig>,message: &Vec<u8>,dst: &Vec<u8>,pks: &Vec<G1>,params: &UniversalParams<Curve>) {
     for j in 0..partial_sig_vec.len() {
-        let p_sig = &partial_sig_vec[j] ;
-        let pk_in_vec = bls::point_to_pubkey(pks[p_sig.i]) ;
-        bls::verify(&pk_in_vec, message, &p_sig.sigma, dst) ;
+        let p_sig = &partial_sig_vec[j] ; 
+        bls::bls_verify(&message, dst, pks[p_sig.i], params, p_sig.sigma) ;
     }
 
 }
@@ -432,26 +431,6 @@ fn main() {
     let duration = start.elapsed();
     println!("Time elapsed in setup is: {:?}", duration);
 
-    // //testing the time for group multiplication vs group exponenetiation
-    // let k = 100000 ;
-    // let start = Instant::now();
-    // let mut temp = G1::rand(rng);
-    // for _i in 0..k {
-    //     temp = (temp + temp).into() ;
-
-    // }
-    // let duration = start.elapsed();
-    // println!("Time elapsed in computing {} group mult is: {:?}",k, duration);
-
-    // let start = Instant::now();
-    // let mut temp1 = G1::rand(rng) ;
-    // let sca = F::rand(rng) ;
-    // for _i in 1..k {
-    //     temp1 = (temp1.mul(sca)).into() ;
-    // }
-    // let duration = start.elapsed();
-    // println!("Time elapsed in computing {} group exponentiation is: {:?}", k,duration);
-
     //generate hints for all the parties
     //let hint_i: Vec<Hint> = Vec::new() ;
     // let start = Instant::now();
@@ -474,37 +453,22 @@ fn main() {
     let public_key = vrf.derive_public_key(&secret_key).unwrap();
     let vrf_message: &[u8] = b"samplec" ;
     let pi = vrf.prove(&secret_key, &vrf_message).unwrap();
-    //let hash = vrf.proof_to_hash(&pi).unwrap();
-    //println!("create committee hash is {:?}",hash) ;
-     let beta = vrf.verify(&public_key, &pi, &vrf_message);
+
+    let beta = vrf.verify(&public_key, &pi, &vrf_message);
 
    
-
-   
-   
-    // match beta {
-    //     Ok(beta) => {
-    //         println!("VRF proof is valid!\nHash output: {}, and size is : {}", hex::encode(&beta),beta.len());
-    //         assert_eq!(hash, beta);
-    //     }
-    //     Err(e) => {
-    //         println!("VRF proof is not valid: {}", e);
-    //     }
-    // }
-
-    //putting the vrf value into aes
-    // let seed: &[u8] = &beta.unwrap() ;
-
-    // let mut rng_cha = rand_chacha::ChaCha12Rng::seed_from_u64(u64::from_be_bytes(seed[0..8].try_into().unwrap())) ;
-    // let committee_position = rng_cha.gen_range(1..n) ;
-    // println!("com_pos is: {}",committee_position) ;
-
-
-
-    //samples n-1 random bits
-    //let bitmap_com = sample_bitmap(n - 1, 0.9);
-    //sample bitmap signer
     let bitmap_com = create_committee(c, n-1, &beta.unwrap()) ;
+    // let mut bitmap_signer = Vec::with_capacity(n);
+    // for i in 0..n-1 {
+    //     if i < t {
+    //         bitmap_signer.push(F::from(1)) ;
+    //     }
+    //     else {
+    //         bitmap_signer.push(F::from(0)) ;
+    //     }
+       
+
+    // }
     let bitmap_signer = create_subset_bitmap(n - 1, &bitmap_com,t) ;
 
     let mut no_of_signers: usize = 0;
@@ -521,6 +485,8 @@ fn main() {
     let dst = bls::DST_ETHEREUM.as_bytes().to_vec();
 
     let sig_vec = partial_signatures_gen(n-1, &sk, &bitmap_signer, &message, &dst) ;
+
+   //assert_eq!( bls::point_to_pubkey(ak.pks[1]), bls::sk_to_pk(sk[1]));
 
 
 
@@ -619,129 +585,8 @@ fn setup(
 
 }
 
-// fn setup(
-//     n: usize,
-//     params: &UniversalParams<Curve>,
-//     sk: &Vec<F>
-// ) -> Vec<Hint> {
-//     let mut sk = sk.clone() ;
-//     sk.push(F::from(0));
-
-//     let all_parties_setup = crossbeam::scope(|s| {
-//         let mut threads = Vec::new();
-//         for i in 0..n {
-//             //et idx = i.clone();
-//             //let n = n.clone();
-//             let sk = sk[i];
-//             let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-//             threads.push(thread_i);
-//         }
-
-//         threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-//     }).unwrap();
-//     all_parties_setup 
-
-// }
-
-
-
-// fn preprocess(
-//     n: usize,
-//     c: usize,
-//     params: &UniversalParams<Curve>,
-//     w: &Vec<F>,
-//     hint_i: &Vec<Hint>,
-//     //sk: &Vec<F>
-// ) -> (VerificationKey, AggregationKey)
-// {
-//     let parties_hints = hint_i.clone() ;
-//     let mut weights = w.clone();
-//     //let mut sk = sk.clone();
-
-//     //last element must be 0
-//     //sk.push(F::from(0));
-//     weights.push(F::from(0));
-
-//     let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
-//     let w_of_x_com = KZG::commit_g1(&params, &w_of_x).unwrap();
-
-//     //allocate space to collect preprocess material from all n-1 parties
-//     let mut qz_contributions : Vec<Vec<G1>> = vec![Default::default(); n];
-//     let mut qx_contributions : Vec<G1> = vec![Default::default(); n];
-//     let mut qx_mul_tau_contributions : Vec<G1> = vec![Default::default(); n];
-//     let mut pks : Vec<G1> = vec![Default::default(); n];
-//     let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
-    
-//     //collect the preprocess phase material from all parties
-//     // let all_parties_setup = crossbeam::scope(|s| {
-//     //     let mut threads = Vec::new();
-//     //     for i in 0..n {
-//     //         //et idx = i.clone();
-//     //         //let n = n.clone();
-//     //         let sk = sk[i];
-//     //         let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-//     //         threads.push(thread_i);
-//     //     }
-
-//     //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-//     // }).unwrap();
-//     // let guard = ProfilerGuard::new(100).unwrap();
-//     //let start = Instant::now() ;
-//     for hint in parties_hints{
-//         //verify hint
-//         //verify_hint(params, &hint);
-//         //extract necessary items for pre-processing
-//         qz_contributions[hint.i] = hint.qz_i_terms.clone();
-//         qx_contributions[hint.i] = hint.qx_i_term.clone();
-//         qx_mul_tau_contributions[hint.i] = hint.qx_i_term_mul_tau.clone();
-//         pks[hint.i] = hint.pk_i.clone();
-//         sk_l_of_tau_coms[hint.i] = hint.sk_i_l_i_of_tau_com_2.clone();
-//     }
-//     //let duration = start.elapsed();
-//     //println!("Time elapsed in verifying the hints is: {:?}", duration);
-//     // if let Ok(report) = guard.report().build() {
-//     //     let file = std::fs::File::create("flamegraph.svg").unwrap();
-//     //     report.flamegraph(file).unwrap();
-//     // }
- 
-//     let start = Instant::now() ;
-//     let z_of_x = utils::compute_vanishing_poly(n);
-//     let x_monomial = utils::compute_x_monomial();
-//     let l_n_minus_1_of_x = utils::lagrange_poly(n, n-1);
-
-//     let vp = VerificationKey {
-//         n: n,
-//         c: c,
-//         g_0: params.powers_of_g[0].clone(),
-//         h_0: params.powers_of_h[0].clone(),
-//         h_1: params.powers_of_h[1].clone(),
-//         l_n_minus_1_of_tau_com: KZG::commit_g1(&params, &l_n_minus_1_of_x).unwrap(),
-//         w_of_tau_com: w_of_x_com,
-//         // combine all sk_i l_i_of_x commitments to get commitment to sk(x)
-//         sk_of_tau_com: add_all_g2(&params, &sk_l_of_tau_coms),
-//         z_of_tau_com: KZG::commit_g2(&params, &z_of_x).unwrap(),
-//         tau_com: KZG::commit_g2(&params, &x_monomial).unwrap(),
-//     };
-
-//     let pp = AggregationKey {
-//         n: n,
-//         weights: w.clone(),
-//         pks: pks,
-//         qz_terms: preprocess_qz_contributions(&qz_contributions),
-//         qx_terms: qx_contributions,
-//         qx_mul_tau_terms: qx_mul_tau_contributions,
-//     };
-//     let duration = start.elapsed();
-//     //println!("Time elapsed in computing vp and pp is: {:?}", duration);
- 
-
-//     (vp, pp)
-
-// }
-
-
-//RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
-fn random_oracle(
+//RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q)
+fn random_oracle_r(
     sk_com: G2,
     w_com: G1,
     b_com: G1,
@@ -749,9 +594,9 @@ fn random_oracle(
     qx_com_signer: G1,
     qz_com_signer: G1,
     qx_mul_x_com_signer: G1,
-    qx_com_commitee: G1,
-    qz_com_committee: G1,
-    qx_mul_x_com_committee: G1,
+    //qx_com_commitee: G1,
+   // qz_com_committee: G1,
+    //qx_mul_x_com_committee: G1,
     q1_com: G1,
     q2_com: G1,
     q3_com: G1,
@@ -766,9 +611,9 @@ fn random_oracle(
     qx_com_signer.serialize_compressed(&mut serialized_data).unwrap();
     qz_com_signer.serialize_compressed(&mut serialized_data).unwrap();
     qx_mul_x_com_signer.serialize_compressed(&mut serialized_data).unwrap();
-    qx_com_commitee.serialize_compressed(&mut serialized_data).unwrap();
-    qz_com_committee.serialize_compressed(&mut serialized_data).unwrap();
-    qx_mul_x_com_committee.serialize_compressed(&mut serialized_data).unwrap();
+    // qx_com_commitee.serialize_compressed(&mut serialized_data).unwrap();
+    // qz_com_committee.serialize_compressed(&mut serialized_data).unwrap();
+    // qx_mul_x_com_committee.serialize_compressed(&mut serialized_data).unwrap();
     q1_com.serialize_compressed(&mut serialized_data).unwrap();
     q2_com.serialize_compressed(&mut serialized_data).unwrap();
     q3_com.serialize_compressed(&mut serialized_data).unwrap();
@@ -849,7 +694,7 @@ fn prove(
     bitmap_sub.push(F::from(1)) ;
 
     //verify the partial signatures
-    partial_signatures_verification(signature_vector, message, dst, &ak.pks) ;
+    partial_signatures_verification(signature_vector, message, dst, &ak.pks, params) ;
     let agg_sigma = compute_agg_sig(signature_vector, n) ;
 
     //compute all the scalars we will need in the prover
@@ -866,6 +711,8 @@ fn prove(
     let b_sub_of_x = utils::interpolate_poly_over_mult_subgroup(&bitmap_sub) ;
     let psw_of_x = compute_psw_poly(&weights, &bitmap_signer);
     let psw_of_x_div_ω = utils::poly_domain_mult_ω(&psw_of_x, &ω_inv);
+
+
     //more polynomials to prove B_signer is a subset of B_com 
     let w_sub_of_x = utils::interpolate_poly_over_mult_subgroup(&sub_weights) ;
     let psw_sub_of_x = compute_psw_poly(&sub_weights, &bitmap_sub) ;
@@ -903,6 +750,8 @@ fn prove(
         &b_signer_of_x.clone().sub(&utils::compute_constant_poly(&F::from(1))));
     let b_check_q_of_x = t_of_x.div(&z_of_x);
 
+//have to implemet taking v as random and computing q(x) = q1(x) + v q2(x) + v^2 q3(x) + v^3 q4(x)
+
     //let qz = filter_and_add(&params, &ak.qz_terms, &bitmap) ;
     //computing the quotient polynomial for the signer sumcheck 
     let qz_com_signer = filter_and_add(&params, &ak.qz_terms, &bitmap_signer);
@@ -911,11 +760,11 @@ fn prove(
     let agg_pk = compute_apk(&ak, &bitmap_signer);
 
     //computing the quotient polynomial for the committee sumcheck
-    let qz_com_committee = filter_and_add(&params, &ak.qz_terms, &bitmap_com);
-    let qx_com_committee = filter_and_add(&params, &ak.qx_terms, &bitmap_com);
-    let qx_mul_tau_com_committee = filter_and_add(&params, &ak.qx_mul_tau_terms, &bitmap_com);
-    let agg_pk_committee = compute_apk(&ak, &bitmap_com);
-    let b_committee_of_tau = KZG::commit_g1(&params, &b_committee_of_x).unwrap() ;
+    // let qz_com_committee = filter_and_add(&params, &ak.qz_terms, &bitmap_com);
+    // let qx_com_committee = filter_and_add(&params, &ak.qx_terms, &bitmap_com);
+    // let qx_mul_tau_com_committee = filter_and_add(&params, &ak.qx_mul_tau_terms, &bitmap_com);
+    // let agg_pk_committee = compute_apk(&ak, &bitmap_com);
+     let b_committee_of_tau = KZG::commit_g1(&params, &b_committee_of_x).unwrap() ;
 
     //required polynomials for the sub vector 
     let b_sub_of_tau = KZG::commit_g1(&params, &b_sub_of_x).unwrap() ;
@@ -935,7 +784,7 @@ fn prove(
     let q4_of_tau_com = KZG::commit_g1(&params, &b_check_q_of_x).unwrap();
 
     // RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
-    let r = random_oracle(
+    let r = random_oracle_r(
         vk.sk_of_tau_com, 
         vk.w_of_tau_com,
         b_signer_of_tau,
@@ -943,9 +792,9 @@ fn prove(
         qx_com_signer,
         qz_com_signer,
         qx_mul_tau_com_signer,
-        qx_com_committee,
-        qz_com_committee,
-        qx_mul_tau_com_committee,
+        // qx_com_committee,
+        // qz_com_committee,
+        // qx_mul_tau_com_committee,
         q1_of_tau_com,
         q2_of_tau_com,
         q3_of_tau_com,
@@ -996,7 +845,7 @@ fn prove(
     Proof {
         agg_pk: agg_pk.clone(),
         agg_sigma: agg_sigma.clone(),
-        agg_pk_committee: agg_pk_committee.clone(),
+        //agg_pk_committee: agg_pk_committee.clone(),
         agg_weight: total_active_weight,
         
         parsum_signer_of_r_div_ω: psw_of_x.evaluate(&r_div_ω),
@@ -1040,25 +889,25 @@ fn prove(
         qx_of_tau_mul_tau_signer: qx_mul_tau_com_signer,
 
         b_committee_of_tau: b_committee_of_tau,
-        qz_of_tau_committee: qz_com_committee,
-        qx_of_tau_committee: qx_com_committee,
-        qx_of_tau_mul_tau_committee: qx_mul_tau_com_committee,
+        // qz_of_tau_committee: qz_com_committee,
+        // qx_of_tau_committee: qx_com_committee,
+        // qx_of_tau_mul_tau_committee: qx_mul_tau_com_committee,
     }
 }
 
-fn verify_opening(
-    vp: &VerificationKey, 
-    commitment: &G1,
-    point: &F, 
-    evaluation: &F,
-    opening_proof: &G1) {
-    let eval_com: G1 = vp.g_0.clone().mul(evaluation).into();
-    let point_com: G2 = vp.h_0.clone().mul(point).into();
+// fn verify_opening(
+//     vp: &VerificationKey, 
+//     commitment: &G1,
+//     point: &F, 
+//     evaluation: &F,
+//     opening_proof: &G1) {
+//     let eval_com: G1 = vp.g_0.clone().mul(evaluation).into();
+//     let point_com: G2 = vp.h_0.clone().mul(point).into();
 
-    let lhs = <Curve as Pairing>::pairing(commitment.clone() - eval_com, vp.h_0);
-    let rhs = <Curve as Pairing>::pairing(opening_proof.clone(), vp.h_1 - point_com);
-    assert_eq!(lhs, rhs);
-}
+//     let lhs = <Curve as Pairing>::pairing(commitment.clone() - eval_com, vp.h_0);
+//     let rhs = <Curve as Pairing>::pairing(opening_proof.clone(), vp.h_1 - point_com);
+//     assert_eq!(lhs, rhs);
+// }
 
 fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F, t: usize) {
     //adjust the w_of_x_com
@@ -1142,7 +991,7 @@ fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &V
     let ω: F = domain.group_gen;
 
     //RO(SK, W, B, parsum_signer, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
-    let r = random_oracle(
+    let r = random_oracle_r(
         vp.sk_of_tau_com, 
         vp.w_of_tau_com,
         π.b_signer_of_tau,
@@ -1150,9 +999,9 @@ fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &V
         π.qx_of_tau_signer,
         π.qz_of_tau_signer,
         π.qx_of_tau_mul_tau_signer,
-        π.qx_of_tau_committee,
-        π.qz_of_tau_committee,
-        π.qx_of_tau_mul_tau_committee,
+        // π.qx_of_tau_committee,
+        // π.qz_of_tau_committee,
+        // π.qx_of_tau_mul_tau_committee,
         
         π.q1_of_tau_com,
         π.q2_of_tau_com,
@@ -1172,39 +1021,15 @@ fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &V
     let ω_pow_n_minus_1 = ω.pow([n-1]);
     let l_n_minus_1_of_r = (ω_pow_n_minus_1 / F::from(n)) * (vanishing_of_r / (r - ω_pow_n_minus_1));
 
-    //assert polynomial identity (B_com(x) − r.B_signer(x)).SK(x) =
-    //(aSK_com − r.aSK_signer )+(Q_com_z(x) − r.Q_signer_z(x)).Z(x) +
-    //(Q_signer_x(x) − r·Q_signer_x(x)).x
-    let x1: G1 = (π.b_signer_of_tau.mul(r)).into_affine() ;
-    let x2: G1 = (π.agg_pk.mul(r)).into_affine() ;
-    let x3: G1 = (π.qz_of_tau_signer.mul(r)).into_affine();
-    let x4: G1 = (π.qx_of_tau_signer.mul(r)).into_affine() ;
-    let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau.sub(x1), &vp.sk_of_tau_com) ;
-    let y1 = <Curve as Pairing>::pairing(&π.agg_pk_committee.sub(x2),vp.h_0) ;
-    let y2 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee.sub(x3),vp.z_of_tau_com) ;
-    let y3 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee.sub(x4),vp.tau_com) ;
-    let rhs = y1.add(y2).add(y3) ;
-    assert_eq!(lhs,rhs) ;
 
+    //assert polynomial identity B_sig(x) SK(x) = ask + Q_z(x) Z(x) + Q_x(x) x
+    let lhs = <Curve as Pairing>::pairing(&π.b_signer_of_tau, &vp.sk_of_tau_com);
+    let x1 = <Curve as Pairing>::pairing(&π.qz_of_tau_signer, &vp.z_of_tau_com);
+    let x2 = <Curve as Pairing>::pairing(&π.qx_of_tau_signer, &vp.tau_com);
+    let x3 = <Curve as Pairing>::pairing(&π.agg_pk, &vp.h_0);
+    let rhs = x1.add(x2).add(x3);
+    assert_eq!(lhs, rhs);
 
-    //assert polynomial identity B_com(x) SK(x) = ask_com + Q_com_z(x) Z(x) + Q_com_x(x) x
-    // let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau, &vp.sk_of_tau_com);
-    // let x1 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee, &vp.z_of_tau_com);
-    // let x2 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee, &vp.tau_com);
-    // let x3 = <Curve as Pairing>::pairing(&π.agg_pk_committee, &vp.h_0);
-    // let rhs = x1.add(x2).add(x3);
-    // assert_eq!(lhs, rhs);
-
-    //assert polynomial identity (B_com(x)-B_signer(x)).SK(x)= (ask_com-ask_signer)+
-    //(Q_com_Z(x)-Q_sign_Z(x)).Z(x)+(Q_com_x(x)-Q_sign_x(x)).x
-    //let temp = &π.b_committee_of_tau.sub(&π.b_committee_of_tau) ;
-    
-    // let lhs = <Curve as Pairing>::pairing(&π.b_committee_of_tau.sub(&π.b_signer_of_tau), &vp.sk_of_tau_com) ;
-    // let y1 = <Curve as Pairing>::pairing(&π.agg_pk_committee.sub(&π.agg_pk),vp.h_0) ;
-    // let y2 = <Curve as Pairing>::pairing(&π.qz_of_tau_committee.sub(&π.qz_of_tau_signer),vp.z_of_tau_com) ;
-    // let y3 = <Curve as Pairing>::pairing(&π.qx_of_tau_committee.sub(&π.qx_of_tau_signer),vp.tau_com) ;
-    // let rhs = y1.add(y2).add(y3) ;
-    // assert_eq!(lhs,rhs) ;
 
     //assert checks on the public part
 
@@ -1256,10 +1081,11 @@ fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &V
     assert_eq!(lhs, rhs);
 
     //run the aggregated bls check 
-    let agg_pk = bls::point_to_pubkey(π.agg_pk) ;
-    let agg_sig = bls::point_to_signature(π.agg_sigma) ;
-    let b = bls::verify(&agg_pk, message, &agg_sig, dst) ;
-    assert_eq!(b,true) ;
+    // let agg_pk = bls::point_to_pubkey(π.agg_pk) ;
+    // let agg_sig = bls::point_to_signature(π.agg_sigma) ;
+    // let b = bls::verify(&agg_pk, message, &agg_sig, dst) ;
+    // assert_eq!(b,true) ;
+    bls::bls_verify(message, dst, π.agg_pk, &params, π.agg_sigma);
 
 }
 
@@ -1291,7 +1117,7 @@ fn compute_agg_sig(
     let n_inv = F::from(1) / F::from(universe_size as u64);
     for i in 0..partial_sig_vec.len() {
         exponents.push(n_inv) ;
-        temp.push(bls::signature_to_point(&partial_sig_vec[i].sigma).unwrap()) ;
+        temp.push(partial_sig_vec[i].sigma) ;
     }
     
 
@@ -1730,6 +1556,22 @@ mod tests {
         let right = (q1_of_r * z_of_r) + (q2_of_r * r) + agg_sk;
         assert_eq!(left, right);
     
+    }
+    #[test]
+    fn bls_signature() {
+        let n = 32 ;
+        let rng = &mut test_rng();
+        let params = KZG::setup(n, rng).expect("Setup failed");
+    
+    
+        let sks: Vec<F> = sample_secret_keys(n-1) ;
+        let mut pks: Vec<G1> = vec![] ;
+        for i in 0..n-1 {
+            let sk_as_poly = utils::compute_constant_poly(&sks[i]) ;
+            let pk = KZG::commit_g1(&params, &sk_as_poly).expect("commitment failed") ;
+            pks.push(pk) ;
+        }
+
     }
 
     #[test]
