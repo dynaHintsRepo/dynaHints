@@ -1,4 +1,5 @@
 #![allow(unused_imports)]
+#![allow(dead_code)]
 use ark_serialize::CanonicalSerialize;
 use ark_ff::{Field, biginteger::BigInteger256};
 use ark_poly::{
@@ -72,6 +73,7 @@ pub fn bls_verify(message: &[u8], domain: &[u8], public_key: G1, params: &Univer
     let rhs = <Curve as Pairing>::pairing(public_key,q) ;
     assert_eq!(lhs,rhs)
 }
+
 
 #[test]
 fn test_sign() {

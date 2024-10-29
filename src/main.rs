@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::sync::Arc;
 //use pprof::ProfilerGuard;
 
 //use rand::SeedableRng;
@@ -88,24 +89,28 @@ struct Proof {
     /// commitment to the ParSum_sub
     parsum_sub_of_tau_com: G1,
     ///commitment to the ParSum_sub well-formedness quotient polynomials 
-    q1_sub_of_tau_com: G1,
-     /// commitment to the ParSum _sub check at omega^{n-1} quotient polynomial
-     q3_sub_of_tau_com: G1,
-     /// commitment to the bitmap well-formedness quotient polynomial
-     q2_sub_of_tau_com: G1,
-     /// commitment to the bitmap check at omega^{n-1} quotient polynomial
-     q4_sub_of_tau_com: G1,
+    // q1_sub_of_tau_com: G1,
+    //  /// commitment to the ParSum _sub check at omega^{n-1} quotient polynomial
+    //  q3_sub_of_tau_com: G1,
+    //  /// commitment to the bitmap well-formedness quotient polynomial
+    //  q2_sub_of_tau_com: G1,
+    //  /// commitment to the bitmap check at omega^{n-1} quotient polynomial
+    //  q4_sub_of_tau_com: G1,
+     //batching 
+     q_sub_of_tau_com: G1,
     /// commitment to the ParSum_signer polynomial ([ParSum(τ)]_1 in the paper)
     parsum_signer_of_tau_com: G1,
 
     /// commitment to the parsum_signer well-formedness quotient polynomial
-    q1_of_tau_com: G1,
+    //q1_of_tau_com: G1,
     /// commitment to the ParSum check at omega^{n-1} quotient polynomial
-    q3_of_tau_com: G1,
+    //q3_of_tau_com: G1,
     /// commitment to the bitmap well-formedness quotient polynomial
-    q2_of_tau_com: G1,
+    //q2_of_tau_com: G1,
     /// commitment to the bitmap check at omega^{n-1} quotient polynomial
-    q4_of_tau_com: G1,
+   // q4_of_tau_com: G1,
+    ///batching 
+    q_of_tau_com: G1,
 
     /// merged opening proof for all openings at x = r
     opening_proof_r: G1,
@@ -121,13 +126,15 @@ struct Proof {
     /// polynomial evaluation of bitmap B(x) at x = r
     b_signer_of_r: F,
     /// polynomial evaluation of quotient Q1(x) at x = r
-    q1_of_r: F,
+    //q1_of_r: F,
     /// polynomial evaluation of quotient Q3(x) at x = r
-    q3_of_r: F,
+    //q3_of_r: F,
     /// polynomial evaluation of quotient Q2(x) at x = r
-    q2_of_r: F,
+    //q2_of_r: F,
     /// polynomial evaluation of quotient Q4(x) at x = r
-    q4_of_r: F,
+    //q4_of_r: F,
+    ///batching 
+    q_of_r: F,
 
     /// polynomial evaluation of ParSum_sub(x) at x = r
     parsum_sub_of_r: F,
@@ -138,13 +145,14 @@ struct Proof {
     /// polynomial evaluation of bitmap B_sub(x) at x = r
     b_sub_of_r: F,
     /// polynomial evaluation of quotient Q1(x) at x = r
-    q1_sub_of_r: F,
-    /// polynomial evaluation of quotient Q3(x) at x = r
-    q3_sub_of_r: F,
-    /// polynomial evaluation of quotient Q2(x) at x = r
-    q2_sub_of_r: F,
-    /// polynomial evaluation of quotient Q4(x) at x = r
-    q4_sub_of_r: F,
+    // q1_sub_of_r: F,
+    // /// polynomial evaluation of quotient Q3(x) at x = r
+    // q3_sub_of_r: F,
+    // /// polynomial evaluation of quotient Q2(x) at x = r
+    // q2_sub_of_r: F,
+    // /// polynomial evaluation of quotient Q4(x) at x = r
+    // q4_sub_of_r: F,
+    q_sub_of_r: F,
 }
 
 /// Hint contains all material output by a party during the setup phase
@@ -249,6 +257,7 @@ fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>)
      let mut counter: u128 = 0; // 128-bit counter
  
      while result.len() < com_size {
+        //println!("result length {}",result.len()) ;
          let mut block = GenericArray::clone_from_slice(&counter.to_be_bytes());
          //println!("create committee block is {:?}",block) ;
          cipher.encrypt_block(&mut block);
@@ -259,6 +268,7 @@ fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>)
          //map the encrypted value in the range of the universe size
          let random_number = (encrypted_value % (universe_size as u128)) as u128 ;
          result.insert(random_number as u32);
+         //println!("After insert result length {}",result.len()) ;
          counter += 1;
      }
      let comm: Vec<u32> = result.into_iter().collect() ;
@@ -270,7 +280,7 @@ fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>)
      }
      for &value in &comm {
          let temp = value as usize ;
-         if temp < universe_size-1 {
+         if temp < universe_size {
              bitmap_com[temp] = F::from(1) ;
          }    
      }
@@ -357,7 +367,7 @@ fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_
      }
      for &value in &comm {
          let temp = value as usize ;
-         if temp < universe_size-1 {
+         if temp < universe_size {
              bitmap_com[temp] = F::from(1) ;
          }    
      }
@@ -417,17 +427,37 @@ fn main() {
     let rng = &mut test_rng();
     let start = Instant::now();
     let params = KZG::setup(n, rng).expect("Setup failed");
+    let params = Arc::new(params) ;
     let duration = start.elapsed();
     println!("Time elapsed in KZG setup is: {:?}", duration);
 
     // -------------- sample universe specific values ---------------
     //sample random keys
-    let sk: Vec<F> = sample_secret_keys(n - 1);
+    let mut sk: Vec<F> = sample_secret_keys(n - 1);
+    sk.push(F::from(0));
+
+    let start = Instant::now();
+    let all_parties_setup = crossbeam::scope(|s| {
+        let mut threads = Vec::new();
+        for i in 0..n {
+            //let idx = i.clone();
+            //let n = n.clone();
+            let sk = sk[i];
+            let params = Arc::clone(&params) ;
+           // println!("Spawning thread for index: {}", i) ;
+            let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+            threads.push(thread_i);
+        }
+
+        threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+    }).unwrap();
+    let duration = start.elapsed();
+    println!("Time elapsed in hint generation is: {:?}", duration);
     //sample random weights for each party
     let weights = sample_weights(n - 1);
 
     let start = Instant::now();
-    let (vk, ak) = setup(n, c,&params, &weights, &sk);
+    let (vk, ak) = setup(n, c,&params, &weights,  &all_parties_setup);
     let duration = start.elapsed();
     println!("Time elapsed in setup is: {:?}", duration);
 
@@ -470,6 +500,9 @@ fn main() {
 
     // }
     let bitmap_signer = create_subset_bitmap(n - 1, &bitmap_com,t) ;
+    // println!("bitmap_com is {:?}",bitmap_com) ;
+    // println!("bitmap_signer is {:?}",bitmap_signer) ;
+
 
     let mut no_of_signers: usize = 0;
 
@@ -507,14 +540,15 @@ fn setup(
     c: usize,
     params: &UniversalParams<Curve>,
     w: &Vec<F>,
-    sk: &Vec<F>
+    //sk: &Vec<F>,
+    all_parties_setup: &Vec<Hint>
 ) -> (VerificationKey, AggregationKey)
 {
     let mut weights = w.clone();
-    let mut sk = sk.clone();
+   // let  sk = sk.clone();
 
     //last element must be 0
-    sk.push(F::from(0));
+   // sk.push(F::from(0));
     weights.push(F::from(0));
 
     let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
@@ -528,18 +562,27 @@ fn setup(
     let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
     
     //collect the setup phase material from all parties
-    let all_parties_setup = crossbeam::scope(|s| {
-        let mut threads = Vec::new();
-        for i in 0..n {
-            //let idx = i.clone();
-            //let n = n.clone();
-            let sk = sk[i];
-            let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-            threads.push(thread_i);
-        }
+    // let all_parties_setup = crossbeam::scope(|s| {
+    //     let mut threads = Vec::new();
+    //     for i in 0..n {
+    //         //let idx = i.clone();
+    //         //let n = n.clone();
+    //         let sk = sk[i];
+    //        // println!("Spawning thread for index: {}", i) ;
+    //         let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+    //         threads.push(thread_i);
+    //     }
 
-        threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-    }).unwrap();
+    //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+    // }).unwrap();
+
+    crossbeam::scope(|s| {
+        for  hint in all_parties_setup{
+            s.spawn(move |_| {
+                verify_hint(params, &hint);
+            });
+        }
+    }).unwrap(); 
 
     for hint in all_parties_setup {
         //verify hint
@@ -597,10 +640,8 @@ fn random_oracle_r(
     //qx_com_commitee: G1,
    // qz_com_committee: G1,
     //qx_mul_x_com_committee: G1,
-    q1_com: G1,
-    q2_com: G1,
-    q3_com: G1,
-    q4_com: G1,
+    q_com: G1,
+    q_sub_com: G1,
 ) -> F {
 
     let mut serialized_data = Vec::new();
@@ -614,10 +655,15 @@ fn random_oracle_r(
     // qx_com_commitee.serialize_compressed(&mut serialized_data).unwrap();
     // qz_com_committee.serialize_compressed(&mut serialized_data).unwrap();
     // qx_mul_x_com_committee.serialize_compressed(&mut serialized_data).unwrap();
-    q1_com.serialize_compressed(&mut serialized_data).unwrap();
-    q2_com.serialize_compressed(&mut serialized_data).unwrap();
-    q3_com.serialize_compressed(&mut serialized_data).unwrap();
-    q4_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q1_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q2_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q3_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q4_com.serialize_compressed(&mut serialized_data).unwrap();
+    q_com.serialize_compressed(&mut serialized_data).unwrap();
+    q_sub_com.serialize_compressed(&mut serialized_data).unwrap();
+    
+    
+
 
     let mut hash_result = Sha256::digest(serialized_data.as_slice());
     hash_result[31] = 0u8; //this makes sure we get a number below modulus
@@ -636,6 +682,48 @@ fn random_oracle_r(
     F::try_from(bi).unwrap()
 }
 
+fn random_oracle_v(
+    sk_com: G2,
+    w_com: G1,
+    b_com: G1,
+    parsum_com: G1,
+    qx_com_signer: G1,
+    qz_com_signer: G1,
+    qx_mul_x_com_signer: G1,
+) -> F {
+
+    let mut serialized_data = Vec::new();
+    sk_com.serialize_compressed(&mut serialized_data).unwrap();
+    w_com.serialize_compressed(&mut serialized_data).unwrap();
+    b_com.serialize_compressed(&mut serialized_data).unwrap();
+    parsum_com.serialize_compressed(&mut serialized_data).unwrap();
+    qx_com_signer.serialize_compressed(&mut serialized_data).unwrap();
+    qz_com_signer.serialize_compressed(&mut serialized_data).unwrap();
+    qx_mul_x_com_signer.serialize_compressed(&mut serialized_data).unwrap();
+    // qx_com_commitee.serialize_compressed(&mut serialized_data).unwrap();
+    // qz_com_committee.serialize_compressed(&mut serialized_data).unwrap();
+    // qx_mul_x_com_committee.serialize_compressed(&mut serialized_data).unwrap();
+    // q1_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q2_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q3_com.serialize_compressed(&mut serialized_data).unwrap();
+    // q4_com.serialize_compressed(&mut serialized_data).unwrap();
+
+    let mut hash_result = Sha256::digest(serialized_data.as_slice());
+    hash_result[31] = 0u8; //this makes sure we get a number below modulus
+    let hash_bytes = hash_result.as_slice();
+
+    let mut hash_values: [u64; 4] = [0; 4];
+    hash_values[0] = u64::from_le_bytes(hash_bytes[0..8].try_into().unwrap());
+    hash_values[1] = u64::from_le_bytes(hash_bytes[8..16].try_into().unwrap());
+    hash_values[2] = u64::from_le_bytes(hash_bytes[16..24].try_into().unwrap());
+    hash_values[3] = u64::from_le_bytes(hash_bytes[24..32].try_into().unwrap());
+    //hash_values[3] = u64::from(0u64);
+
+    let bi = BigInteger256::new(hash_values);
+
+    //let input: [u8; 32] = [0u8; 32];
+    F::try_from(bi).unwrap()
+}
 
 fn prove(
     params: &UniversalParams<Curve>,
@@ -657,7 +745,7 @@ fn prove(
         .iter()
         .zip(weights.iter())
         .fold(F::from(0), |acc, (&x, &y)| acc + (x * y));
-    println!("total active weight is {:?}",total_active_weight) ;
+    //println!("total active weight is {:?}",total_active_weight) ;
     //weight's last element must the additive inverse of active weight
     weights.push(F::from(0) - total_active_weight);
 
@@ -678,11 +766,11 @@ fn prove(
        
     }
 
-    let weight_of_b_sub = bitmap_sub
-    .iter()
-    .zip(weights.iter())
-    .fold(F::from(0), |acc, (&x, &y)| acc + (x * y));
-    println!("weight of b_sub is {:?}",weight_of_b_sub) ;
+    // let weight_of_b_sub = bitmap_sub
+    // .iter()
+    // .zip(weights.iter())
+    // .fold(F::from(0), |acc, (&x, &y)| acc + (x * y));
+   // println!("weight of b_sub is {:?}",weight_of_b_sub) ;
     //weight vector for bitmap_sub 
     let mut sub_weights = ak.weights.clone() ;
     //sub_weight's last element must the additive inverse of weight_of_b_sub
@@ -750,13 +838,73 @@ fn prove(
         &b_signer_of_x.clone().sub(&utils::compute_constant_poly(&F::from(1))));
     let b_check_q_of_x = t_of_x.div(&z_of_x);
 
-//have to implemet taking v as random and computing q(x) = q1(x) + v q2(x) + v^2 q3(x) + v^3 q4(x)
-
-    //let qz = filter_and_add(&params, &ak.qz_terms, &bitmap) ;
-    //computing the quotient polynomial for the signer sumcheck 
+    let parsum_signer_of_tau_com = KZG::commit_g1(&params, &psw_of_x).unwrap();
+    let b_signer_of_tau = KZG::commit_g1(&params, &b_signer_of_x).unwrap();
+    let b_committee_of_tau = KZG::commit_g1(&params, &b_committee_of_x).unwrap() ;
     let qz_com_signer = filter_and_add(&params, &ak.qz_terms, &bitmap_signer);
     let qx_com_signer = filter_and_add(&params, &ak.qx_terms, &bitmap_signer);
     let qx_mul_tau_com_signer = filter_and_add(&params, &ak.qx_mul_tau_terms, &bitmap_signer);
+
+    let b_sub_of_tau = KZG::commit_g1(&params, &b_sub_of_x).unwrap() ;
+    let parsum_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_of_x).unwrap();
+
+//have to implemet taking v as random and computing q(x) = q1(x) + v q2(x) + v^2 q3(x) + v^3 q4(x)
+let v1 = random_oracle_v(
+    vk.sk_of_tau_com, 
+    vk.w_of_tau_com,
+    b_signer_of_tau,
+    parsum_signer_of_tau_com,
+    qx_com_signer,
+    qz_com_signer,
+    qx_mul_tau_com_signer,
+    // qx_com_committee,
+    // qz_com_committee,
+    // qx_mul_tau_com_committee,
+    // q1_of_tau_com,
+    // q2_of_tau_com,
+    // q3_of_tau_com,
+    // q4_of_tau_com
+);
+
+let v2 = random_oracle_v(
+    vk.sk_of_tau_com, 
+    vk.w_of_tau_com,
+    b_sub_of_tau,
+    parsum_sub_of_tau_com,
+    qx_com_signer,
+    qz_com_signer,
+    qx_mul_tau_com_signer,
+    // qx_com_committee,
+    // qz_com_committee,
+    // qx_mul_tau_com_committee,
+    // q1_of_tau_com,
+    // q2_of_tau_com,
+    // q3_of_tau_com,
+    // q4_of_tau_com
+);
+   
+   //let v = F::from(2) ;
+   let mut q_of_x = psw_wff_q_of_x.clone()  ;
+   for i in 0..(q_of_x.degree()+1) {
+    q_of_x.coeffs[i] = q_of_x.coeffs[i] + v1 * b_wff_q_of_x.coeffs[i] + v1*v1 * psw_check_q_of_x.coeffs[i]
+                      + v1 *v1*v1 * b_check_q_of_x.coeffs[i]
+
+   } ;
+   let q_of_tau_com = KZG::commit_g1(&params, &q_of_x).unwrap() ;
+
+   let mut q_sub_of_x = psw_sub_wff_q_of_x.clone()  ;
+   for i in 0..(q_sub_of_x.degree()+1) {
+    q_sub_of_x.coeffs[i] = q_sub_of_x.coeffs[i] + v2 * b_sub_wff_q_of_x.coeffs[i] + v2*v2* psw_sub_check_q_of_x.coeffs[i]
+                      + v2 *v2*v2 * b_sub_check_q_of_x.coeffs[i]
+
+   } ;
+   let q_sub_of_tau_com = KZG::commit_g1(&params, &q_sub_of_x).unwrap() ;
+
+
+
+    //let qz = filter_and_add(&params, &ak.qz_terms, &bitmap) ;
+    //computing the quotient polynomial for the signer sumcheck 
+    
     let agg_pk = compute_apk(&ak, &bitmap_signer);
 
     //computing the quotient polynomial for the committee sumcheck
@@ -764,24 +912,22 @@ fn prove(
     // let qx_com_committee = filter_and_add(&params, &ak.qx_terms, &bitmap_com);
     // let qx_mul_tau_com_committee = filter_and_add(&params, &ak.qx_mul_tau_terms, &bitmap_com);
     // let agg_pk_committee = compute_apk(&ak, &bitmap_com);
-     let b_committee_of_tau = KZG::commit_g1(&params, &b_committee_of_x).unwrap() ;
+     
 
     //required polynomials for the sub vector 
-    let b_sub_of_tau = KZG::commit_g1(&params, &b_sub_of_x).unwrap() ;
-    let parsum_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_of_x).unwrap();
+   
    // let b_signer_of_tau = KZG::commit_g1(&params, &b_signer_of_x).unwrap();
-    let q1_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_wff_q_of_x).unwrap();
-    let q2_sub_of_tau_com = KZG::commit_g1(&params, &b_sub_wff_q_of_x).unwrap();
-    let q3_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_check_q_of_x).unwrap();
-    let q4_sub_of_tau_com = KZG::commit_g1(&params, &b_sub_check_q_of_x).unwrap();
+    // let q1_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_wff_q_of_x).unwrap();
+    // let q2_sub_of_tau_com = KZG::commit_g1(&params, &b_sub_wff_q_of_x).unwrap();
+    // let q3_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_check_q_of_x).unwrap();
+    // let q4_sub_of_tau_com = KZG::commit_g1(&params, &b_sub_check_q_of_x).unwrap();
 
 
-    let parsum_signer_of_tau_com = KZG::commit_g1(&params, &psw_of_x).unwrap();
-    let b_signer_of_tau = KZG::commit_g1(&params, &b_signer_of_x).unwrap();
-    let q1_of_tau_com = KZG::commit_g1(&params, &psw_wff_q_of_x).unwrap();
-    let q2_of_tau_com = KZG::commit_g1(&params, &b_wff_q_of_x).unwrap();
-    let q3_of_tau_com = KZG::commit_g1(&params, &psw_check_q_of_x).unwrap();
-    let q4_of_tau_com = KZG::commit_g1(&params, &b_check_q_of_x).unwrap();
+   
+    // let q1_of_tau_com = KZG::commit_g1(&params, &psw_wff_q_of_x).unwrap();
+    // let q2_of_tau_com = KZG::commit_g1(&params, &b_wff_q_of_x).unwrap();
+    // let q3_of_tau_com = KZG::commit_g1(&params, &psw_check_q_of_x).unwrap();
+    // let q4_of_tau_com = KZG::commit_g1(&params, &b_check_q_of_x).unwrap();
 
     // RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q1, Q2, Q3, Q4)
     let r = random_oracle_r(
@@ -795,29 +941,32 @@ fn prove(
         // qx_com_committee,
         // qz_com_committee,
         // qx_mul_tau_com_committee,
-        q1_of_tau_com,
-        q2_of_tau_com,
-        q3_of_tau_com,
-        q4_of_tau_com
+        // q1_of_tau_com,
+        // q2_of_tau_com,
+        // q3_of_tau_com,
+        // q4_of_tau_com
+        q_of_tau_com,
+        q_sub_of_tau_com
     );
     let r_div_ω: F = r / ω;
+
+    
 
     let psw_of_r_proof = KZG::compute_opening_proof(&params, &psw_of_x, &r).unwrap();
     let w_of_r_proof = KZG::compute_opening_proof(&params, &w_of_x, &r).unwrap();
     let b_signer_of_r_proof = KZG::compute_opening_proof(&params, &b_signer_of_x, &r).unwrap();
-    let psw_wff_q_of_r_proof = KZG::compute_opening_proof(&params, &psw_wff_q_of_x, &r).unwrap();
-    let psw_check_q_of_r_proof = KZG::compute_opening_proof(&params, &psw_check_q_of_x, &r).unwrap();
-    let b_wff_q_of_r_proof = KZG::compute_opening_proof(&params, &b_wff_q_of_x, &r).unwrap();
-    let b_check_q_of_r_proof = KZG::compute_opening_proof(&params, &b_check_q_of_x, &r).unwrap();
+    // let psw_wff_q_of_r_proof = KZG::compute_opening_proof(&params, &psw_wff_q_of_x, &r).unwrap();
+    // let psw_check_q_of_r_proof = KZG::compute_opening_proof(&params, &psw_check_q_of_x, &r).unwrap();
+    // let b_wff_q_of_r_proof = KZG::compute_opening_proof(&params, &b_wff_q_of_x, &r).unwrap();
+    // let b_check_q_of_r_proof = KZG::compute_opening_proof(&params, &b_check_q_of_x, &r).unwrap();
+    let q_of_r_proof = KZG::compute_opening_proof(&params, &q_of_x, &r).unwrap();
+    let q_sub_of_r_proof = KZG::compute_opening_proof(&params, &q_sub_of_x, &r).unwrap();
+
 
     //for sub vector 
     let psw_sub_of_r_proof = KZG::compute_opening_proof(&params, &psw_sub_of_x, &r).unwrap();
     let w_sub_of_r_proof = KZG::compute_opening_proof(&params, &w_sub_of_x, &r).unwrap();
     let b_sub_of_r_proof = KZG::compute_opening_proof(&params, &b_sub_of_x, &r).unwrap();
-    let psw_sub_wff_q_of_r_proof = KZG::compute_opening_proof(&params, &psw_sub_wff_q_of_x, &r).unwrap();
-    let psw_sub_check_q_of_r_proof = KZG::compute_opening_proof(&params, &psw_sub_check_q_of_x, &r).unwrap();
-    let b_sub_wff_q_of_r_proof = KZG::compute_opening_proof(&params, &b_sub_wff_q_of_x, &r).unwrap();
-    let b_sub_check_q_of_r_proof = KZG::compute_opening_proof(&params, &b_sub_check_q_of_x, &r).unwrap();
 
     //for r_div_ω
     let psw_sub_of_r_div_ω_proof = KZG::compute_opening_proof(&params, &psw_sub_of_x, &r_div_ω).unwrap();
@@ -826,17 +975,11 @@ fn prove(
     let merged_proof: G1 = (psw_of_r_proof
         + w_of_r_proof.mul(r.pow([1]))
         + b_signer_of_r_proof.mul(r.pow([2]))
-        + psw_wff_q_of_r_proof.mul(r.pow([3]))
-        + psw_check_q_of_r_proof.mul(r.pow([4]))
-        + b_wff_q_of_r_proof.mul(r.pow([5]))
-        + b_check_q_of_r_proof.mul(r.pow([6]))
-        +psw_sub_of_r_proof.mul(r.pow([7]))
-        + w_sub_of_r_proof.mul(r.pow([8]))
-        + b_sub_of_r_proof.mul(r.pow([9]))
-        + psw_sub_wff_q_of_r_proof.mul(r.pow([10]))
-        + psw_sub_check_q_of_r_proof.mul(r.pow([11]))
-        + b_sub_wff_q_of_r_proof.mul(r.pow([12]))
-        + b_sub_check_q_of_r_proof.mul(r.pow([13]))).into();
+        + q_of_r_proof.mul(r.pow([3]))
+        +psw_sub_of_r_proof.mul(r.pow([4]))
+        + w_sub_of_r_proof.mul(r.pow([5]))
+        + b_sub_of_r_proof.mul(r.pow([6]))
+        + q_sub_of_r_proof.mul(r.pow([7]))).into();
     
     let merged_proof_at_r_div_ω : G1= (psw_sub_of_r_div_ω_proof
         + psw_of_r_div_ω_proof.mul(r_div_ω.pow([1]))).into() ;
@@ -855,35 +998,23 @@ fn prove(
         parsum_signer_of_r: psw_of_x.evaluate(&r),
         w_of_r: w_of_x.evaluate(&r),
         b_signer_of_r: b_signer_of_x.evaluate(&r),
-        q1_of_r: psw_wff_q_of_x.evaluate(&r),
-        q3_of_r: psw_check_q_of_x.evaluate(&r),
-        q2_of_r: b_wff_q_of_x.evaluate(&r),
-        q4_of_r: b_check_q_of_x.evaluate(&r),
+        q_of_r: q_of_x.evaluate(&r),
 
         parsum_sub_of_r: psw_sub_of_x.evaluate(&r),
         w_sub_of_r: w_sub_of_x.evaluate(&r),
+        q_sub_of_r: q_sub_of_x.evaluate(&r),
         b_sub_of_r: b_sub_of_x.evaluate(&r),
-        q1_sub_of_r: psw_sub_wff_q_of_x.evaluate(&r),
-        q3_sub_of_r: psw_sub_check_q_of_x.evaluate(&r),
-        q2_sub_of_r: b_sub_wff_q_of_x.evaluate(&r),
-        q4_sub_of_r: b_sub_check_q_of_x.evaluate(&r),
+
         
         opening_proof_r: merged_proof.into(),
 
         parsum_signer_of_tau_com: parsum_signer_of_tau_com,
         b_signer_of_tau: b_signer_of_tau,
-        q1_of_tau_com: q1_of_tau_com,
-        q3_of_tau_com: q3_of_tau_com,
-        q2_of_tau_com: q2_of_tau_com,
-        q4_of_tau_com: q4_of_tau_com,
+        q_of_tau_com: q_of_tau_com,
 
         parsum_sub_of_tau_com: parsum_sub_of_tau_com,
         b_sub_of_tau: b_sub_of_tau,
-        q1_sub_of_tau_com: q1_sub_of_tau_com,
-        q3_sub_of_tau_com: q3_sub_of_tau_com,
-        q2_sub_of_tau_com: q2_sub_of_tau_com,
-        q4_sub_of_tau_com: q4_sub_of_tau_com,
-
+        q_sub_of_tau_com: q_sub_of_tau_com,
         qz_of_tau_signer: qz_com_signer,
         qx_of_tau_signer: qx_com_signer,
         qx_of_tau_mul_tau_signer: qx_mul_tau_com_signer,
@@ -922,33 +1053,29 @@ fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F, t: usize) {
     let psw_sub_of_r_argument = π.parsum_sub_of_tau_com - vp.g_0.clone().mul(π.parsum_sub_of_r).into_affine();
     let w_sub_of_r_argument = w_sub_of_x_com - vp.g_0.clone().mul(π.w_sub_of_r).into_affine();
     let b_sub_of_r_argument = π.b_sub_of_tau - vp.g_0.clone().mul(π.b_sub_of_r).into_affine();
-    let psw_sub_wff_q_of_r_argument = π.q1_sub_of_tau_com - vp.g_0.clone().mul(π.q1_sub_of_r).into_affine();
-    let psw_sub_check_q_of_r_argument = π.q3_sub_of_tau_com - vp.g_0.clone().mul(π.q3_sub_of_r).into_affine();
-    let b_sub_wff_q_of_r_argument = π.q2_sub_of_tau_com - vp.g_0.clone().mul(π.q2_sub_of_r).into_affine();
-    let b_sub_check_q_of_r_argument = π.q4_sub_of_tau_com - vp.g_0.clone().mul(π.q4_sub_of_r).into_affine();
+    // let psw_sub_wff_q_of_r_argument = π.q1_sub_of_tau_com - vp.g_0.clone().mul(π.q1_sub_of_r).into_affine();
+    // let psw_sub_check_q_of_r_argument = π.q3_sub_of_tau_com - vp.g_0.clone().mul(π.q3_sub_of_r).into_affine();
+    // let b_sub_wff_q_of_r_argument = π.q2_sub_of_tau_com - vp.g_0.clone().mul(π.q2_sub_of_r).into_affine();
+    // let b_sub_check_q_of_r_argument = π.q4_sub_of_tau_com - vp.g_0.clone().mul(π.q4_sub_of_r).into_affine();
+    let q_sub_of_r_argument =  π.q_sub_of_tau_com - vp.g_0.clone().mul(π.q_sub_of_r).into_affine();
 
     let psw_of_r_argument = π.parsum_signer_of_tau_com - vp.g_0.clone().mul(π.parsum_signer_of_r).into_affine();
     let w_of_r_argument = w_of_x_com - vp.g_0.clone().mul(π.w_of_r).into_affine();
     let b_signer_of_r_argument = π.b_signer_of_tau - vp.g_0.clone().mul(π.b_signer_of_r).into_affine();
-    let psw_wff_q_of_r_argument = π.q1_of_tau_com - vp.g_0.clone().mul(π.q1_of_r).into_affine();
-    let psw_check_q_of_r_argument = π.q3_of_tau_com - vp.g_0.clone().mul(π.q3_of_r).into_affine();
-    let b_wff_q_of_r_argument = π.q2_of_tau_com - vp.g_0.clone().mul(π.q2_of_r).into_affine();
-    let b_check_q_of_r_argument = π.q4_of_tau_com - vp.g_0.clone().mul(π.q4_of_r).into_affine();
+    // let psw_wff_q_of_r_argument = π.q1_of_tau_com - vp.g_0.clone().mul(π.q1_of_r).into_affine();
+    // let psw_check_q_of_r_argument = π.q3_of_tau_com - vp.g_0.clone().mul(π.q3_of_r).into_affine();
+    // let b_wff_q_of_r_argument = π.q2_of_tau_com - vp.g_0.clone().mul(π.q2_of_r).into_affine();
+    // let b_check_q_of_r_argument = π.q4_of_tau_com - vp.g_0.clone().mul(π.q4_of_r).into_affine();
+    let q_of_r_argument =  π.q_of_tau_com - vp.g_0.clone().mul(π.q_of_r).into_affine();
 
     let merged_argument: G1 = (psw_of_r_argument
         + w_of_r_argument.mul(r.pow([1]))
         + b_signer_of_r_argument.mul(r.pow([2]))
-        + psw_wff_q_of_r_argument.mul(r.pow([3]))
-        + psw_check_q_of_r_argument.mul(r.pow([4]))
-        + b_wff_q_of_r_argument.mul(r.pow([5]))
-        + b_check_q_of_r_argument.mul(r.pow([6]))
-        +psw_sub_of_r_argument.mul(r.pow([7]))
-        + w_sub_of_r_argument.mul(r.pow([8]))
-        + b_sub_of_r_argument.mul(r.pow([9]))
-        + psw_sub_wff_q_of_r_argument.mul(r.pow([10]))
-        + psw_sub_check_q_of_r_argument.mul(r.pow([11]))
-        + b_sub_wff_q_of_r_argument.mul(r.pow([12]))
-        + b_sub_check_q_of_r_argument.mul(r.pow([13]))).into_affine();
+        + q_of_r_argument.mul(r.pow([3]))
+        +psw_sub_of_r_argument.mul(r.pow([4]))
+        + w_sub_of_r_argument.mul(r.pow([5]))
+        + b_sub_of_r_argument.mul(r.pow([6]))
+        + q_sub_of_r_argument.mul(r.pow([7]))).into_affine();
 
     let lhs = <Curve as Pairing>::pairing(
         merged_argument, 
@@ -1002,12 +1129,36 @@ fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &V
         // π.qx_of_tau_committee,
         // π.qz_of_tau_committee,
         // π.qx_of_tau_mul_tau_committee,
-        
-        π.q1_of_tau_com,
-        π.q2_of_tau_com,
-        π.q3_of_tau_com,
-        π.q4_of_tau_com
+        π.q_of_tau_com,
+        π.q_sub_of_tau_com,
     );
+
+    let v1 = random_oracle_v(
+        vp.sk_of_tau_com, 
+        vp.w_of_tau_com,
+        π.b_signer_of_tau,
+        π.parsum_signer_of_tau_com,
+        π.qx_of_tau_signer,
+        π.qz_of_tau_signer,
+        π.qx_of_tau_mul_tau_signer,
+        // π.qx_of_tau_committee,
+        // π.qz_of_tau_committee,
+        // π.qx_of_tau_mul_tau_committee,
+    );
+
+    let v2 = random_oracle_v(
+        vp.sk_of_tau_com, 
+        vp.w_of_tau_com,
+        π.b_sub_of_tau,
+        π.parsum_sub_of_tau_com,
+        π.qx_of_tau_signer,
+        π.qz_of_tau_signer,
+        π.qx_of_tau_mul_tau_signer,
+        // π.qx_of_tau_committee,
+        // π.qz_of_tau_committee,
+        // π.qx_of_tau_mul_tau_committee,
+    );
+
 
     // verify the polynomial openings at r and r / ω
     verify_openings_in_proof(vp, π, r,t);
@@ -1033,47 +1184,21 @@ fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &V
 
     //assert checks on the public part
 
-    //parsum_signerW(r) − parsum_signerW(r/ω) − W(r) · b(r) = Q(r) · (r^n − 1)
-    let lhs = π.parsum_signer_of_r - π.parsum_signer_of_r_div_ω - π.w_of_r * π.b_signer_of_r;
-    let rhs = π.q1_of_r * vanishing_of_r;
-    assert_eq!(lhs, rhs);
+    let rhs = π.q_of_r * vanishing_of_r ;
+    let lhs = (π.parsum_signer_of_r - π.parsum_signer_of_r_div_ω - π.w_of_r * π.b_signer_of_r)
+                                                        + v1 * (π.b_signer_of_r * π.b_signer_of_r - π.b_signer_of_r)
+                                                        + v1*v1*(l_n_minus_1_of_r * π.parsum_signer_of_r)
+                                                        + v1*v1*v1*(l_n_minus_1_of_r * (π.b_signer_of_r - F::from(1))) ;
+    assert_eq!(lhs,rhs) ;
 
-    //Ln−1(X) · parsum_signerW(X) = Z(X) · Q2(X)
-    //TODO: compute l_n_minus_1_of_r in verifier -- dont put it in the proof.
-    let lhs = l_n_minus_1_of_r * π.parsum_signer_of_r;
-    let rhs = vanishing_of_r * π.q3_of_r;
-    assert_eq!(lhs, rhs);
 
-    //b(r) * b(r) - b(r) = Q(r) · (r^n − 1)
-    let lhs = π.b_signer_of_r * π.b_signer_of_r - π.b_signer_of_r;
-    let rhs = π.q2_of_r * vanishing_of_r;
-    assert_eq!(lhs, rhs);
-
-    //Ln−1(X) · (b(X) − 1) = Z(X) · Q4(X)
-    let lhs = l_n_minus_1_of_r * (π.b_signer_of_r - F::from(1));
-    let rhs = vanishing_of_r * π.q4_of_r;
-    assert_eq!(lhs, rhs);
-
-     //parsum_subW(r) − parsum_subW(r/ω) − W_sub(r) · b(r) = Q(r) · (r^n − 1)
-    let lhs = π.parsum_sub_of_r - π.parsum_sub_of_r_div_ω - π.w_sub_of_r * π.b_sub_of_r;
-    let rhs = π.q1_sub_of_r * vanishing_of_r;
-    assert_eq!(lhs, rhs);
-
-     //Ln−1(X) · parsum_subW(X) = Z(X) · Q2(X)
-    //TODO: compute l_n_minus_1_of_r in verifier -- dont put it in the proof.
-    let lhs = l_n_minus_1_of_r * π.parsum_sub_of_r;
-    let rhs = vanishing_of_r * π.q3_sub_of_r;
-    assert_eq!(lhs, rhs);
-
-    //b_sub(r) * b_sub(r) - b_sub(r) = Q(r) · (r^n − 1)
-    let lhs = π.b_sub_of_r * π.b_sub_of_r - π.b_sub_of_r;
-    let rhs = π.q2_sub_of_r * vanishing_of_r;
-    assert_eq!(lhs, rhs);
-
-    //Ln−1(X) · (b_sub(X) − 1) = Z(X) · Q4(X)
-    let lhs = l_n_minus_1_of_r * (π.b_sub_of_r - F::from(1));
-    let rhs = vanishing_of_r * π.q4_sub_of_r;
-    assert_eq!(lhs, rhs);
+    //..........................// for sub vector
+    let rhs = π.q_sub_of_r * vanishing_of_r ;
+    let lhs = (π.parsum_sub_of_r - π.parsum_sub_of_r_div_ω - π.w_sub_of_r * π.b_sub_of_r)
+                                                        + v2 * (π.b_sub_of_r * π.b_sub_of_r - π.b_sub_of_r)
+                                                        + v2*v2*(l_n_minus_1_of_r * π.parsum_sub_of_r)
+                                                        + v2*v2*v2*(l_n_minus_1_of_r * (π.b_sub_of_r - F::from(1))) ;
+    assert_eq!(lhs,rhs) ;
 
     //run the degree check e([Qx(τ)]_1, [τ]_2) ?= e([Qx(τ)·τ]_1, [1]_2)
     let lhs = <Curve as Pairing>::pairing(&π.qx_of_tau_signer, &vp.h_1);
@@ -1290,12 +1415,12 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     //l_i^2-l_i
     //let l_i_mult_l_i_sub_l_i = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
     //(l_i^2-l_i)/Z())
-    //let l_i_mult_l_i_sub_l_i_sub_z = l_i_mult_l_i_sub_l_i.div(&z_of_x) ;
+   // let l_i_mult_l_i_sub_l_i_sub_z = l_i_mult_l_i_sub_l_i.div(&z_of_x) ;
     //[(l_i^2-l_i)/Z())]
     //let l_i_mult_l_i_sub_l_i_sub_z_com = KZG::commit_g2(&params, &l_i_mult_l_i_sub_l_i_sub_z).expect("commitment failed");
     //now to calculate the cross terms and for i=j l_i^2-l_i
     let mut cross_terms = Vec::new();
-    for j in 0..n {
+    for j in 0..n+1 {
         if j != i {
             let l_j_of_x = utils::lagrange_poly(n, j);
             cross_terms.push((l_j_of_x.mul(&l_i_of_x)).div(&z_of_x)) ;
@@ -1306,7 +1431,7 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     }
     //to compute commitments to the cross terms 
     let mut cross_terms_com = Vec::with_capacity(n) ;
-    for j in 0..n {
+    for j in 0..n+1 {
             cross_terms_com.push(KZG::commit_g2(&params, &cross_terms[j]).expect("commitment failed"));
                
     }
@@ -1356,35 +1481,39 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     //take n+3 no of random numbers to compute a random linear combination
     let mut random_numbers = Vec::with_capacity(n+3) ;
     let mut rng = ark_std::test_rng();
+    let mut random_integer = u64::rand(&mut rng) ;
     for _j in 0..n+3 {
-        random_numbers.push(F::rand(&mut rng)) ;
+        random_numbers.push(F::from(random_integer)) ;
+        random_integer = random_integer * random_integer ;
+        
     }
-    let mut terms_in_random_l_comb = Vec::with_capacity(n+3) ;
-    terms_in_random_l_comb.push(l_i_of_tau_com.mul(random_numbers[0])) ;
-    //compute the random linear combinations
-    for j in 1..n+1 {
-        terms_in_random_l_comb.push(cross_terms_com[j-1].mul(random_numbers[j])) ;
+    let mut hints_linear_comb_left = vec![] ;
+    hints_linear_comb_left.push(hint.sk_i_l_i_of_tau_com_1) ;
+    hints_linear_comb_left.push(hint.qx_i_term) ;
+    hints_linear_comb_left.push(hint.qx_i_term_mul_tau) ;
+    for i in 0..n {
+        hints_linear_comb_left.push(hint.qz_i_terms[i]) ;
     }
-    terms_in_random_l_comb.push(qx_term_com.mul(random_numbers[n+1])) ;
-    terms_in_random_l_comb.push(qx_term_mul_tau_com.mul(random_numbers[n+2])) ;
-    let mut lhs_mult = hint.sk_i_l_i_of_tau_com_1 ;
-    for j in 0..n {
-        lhs_mult = lhs_mult.add(hint.qz_i_terms[j]).into() ;
-    }
-    lhs_mult = lhs_mult.add(hint.qx_i_term).into() ;
-    lhs_mult = lhs_mult.add(hint.qx_i_term_mul_tau).into() ;
-    let lhs =  <Curve as Pairing>::pairing(lhs_mult, params.powers_of_h[0]);
-    let mut rhs_mult = l_i_of_tau_com ;
-    for j in 0..n {
-        rhs_mult = rhs_mult.add(cross_terms_com[j]).into() ;
-    }
-    rhs_mult = rhs_mult.add(qx_term_com).into() ;
-    rhs_mult = rhs_mult.add(qx_term_mul_tau_com).into() ;
-    let rhs = <Curve as Pairing>::pairing(hint.pk_i,rhs_mult);
-    assert_eq!(lhs,rhs) ;
-    
-    
 
+    let mut hints_linear_comb_right = vec![] ;
+    hints_linear_comb_right.push(l_i_of_tau_com) ;
+    hints_linear_comb_right.push(qx_term_com) ;
+    hints_linear_comb_right.push(qx_term_mul_tau_com) ;
+    for i in 0..n {
+        hints_linear_comb_right.push(cross_terms_com[i]) ;
+    }
+
+
+   let lhs_pipenger = <<Curve as Pairing>::G1 as VariableBaseMSM>
+    ::msm(&hints_linear_comb_left[..], &random_numbers).unwrap().into_affine() ;
+
+    let rhs_pipenger =  <<Curve as Pairing>::G2 as VariableBaseMSM>
+    ::msm(&hints_linear_comb_right[..], &random_numbers).unwrap().into_affine() ;
+
+    let lhs =  <Curve as Pairing>::pairing(lhs_pipenger, params.powers_of_h[0]);
+    let rhs = <Curve as Pairing>::pairing(hint.pk_i, rhs_pipenger);
+
+    assert_eq!(lhs,rhs) ;
 
 }
 
