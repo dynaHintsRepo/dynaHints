@@ -1521,6 +1521,8 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
 
 #[cfg(test)]
 mod tests {
+    use ark_ec::short_weierstrass::Affine;
+
     use super::*;
 
     fn aggregate_sk(sk: &Vec<F>, bitmap: &Vec<F>) -> F {
@@ -1796,91 +1798,102 @@ mod tests {
     }
     #[test]
     fn test_pipenger() {
-        let n = 1024; 
+        let n = 524288; 
         let mut rng = ark_std::test_rng();
         let params = KZG::setup(n, &mut rng).expect("Setup failed");
         let mut random_numbers = Vec::with_capacity(n+3) ;
         
     
         let sk = F::rand(&mut rng) ;
-        let hint = hint_gen(&params,n,1,&sk) ;
+        //let hint = hint_gen(&params,n,1,&sk) ;
         let mut hints_linear_comb_left = vec![] ;
-        hints_linear_comb_left.push(hint.sk_i_l_i_of_tau_com_1) ;
-        hints_linear_comb_left.push(hint.qx_i_term) ;
-        hints_linear_comb_left.push(hint.qx_i_term_mul_tau) ;
+        let g = params.powers_of_g[0];
+        hints_linear_comb_left.push((g.mul(F::from(1))).into()) ;
+        hints_linear_comb_left.push((g.mul(F::from(2))).into()) ;
+        hints_linear_comb_left.push((g.mul(F::from(3))).into() );
         for i in 0..n {
-            hints_linear_comb_left.push(hint.qz_i_terms[i]) ;
+            hints_linear_comb_left.push(g) ;
         }
     
-        let l_i_of_x = utils::lagrange_poly(n, 1);
-        let z_of_x = utils::compute_vanishing_poly(n);
+    //     let l_i_of_x = utils::lagrange_poly(n, 1);
+    //     let z_of_x = utils::compute_vanishing_poly(n);
     
-        let l_i_of_tau_com = KZG::commit_g2(&params, &l_i_of_x).expect("commitment failed");
-        // let lhs = <Curve as Pairing>::pairing(hint.sk_i_l_i_of_tau_com_1, params.powers_of_h[0]);
-        // let rhs = <Curve as Pairing>::pairing(hint.pk_i, l_i_of_tau_com);
-        // assert_eq!(lhs, rhs);
+    //     let l_i_of_tau_com = KZG::commit_g2(&params, &l_i_of_x).expect("commitment failed");
+    //     // let lhs = <Curve as Pairing>::pairing(hint.sk_i_l_i_of_tau_com_1, params.powers_of_h[0]);
+    //     // let rhs = <Curve as Pairing>::pairing(hint.pk_i, l_i_of_tau_com);
+    //     // assert_eq!(lhs, rhs);
     
-        //l_i^2-l_i
-        //let l_i_mult_l_i_sub_l_i = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
-        //(l_i^2-l_i)/Z())
-       // let l_i_mult_l_i_sub_l_i_sub_z = l_i_mult_l_i_sub_l_i.div(&z_of_x) ;
-        //[(l_i^2-l_i)/Z())]
-        //let l_i_mult_l_i_sub_l_i_sub_z_com = KZG::commit_g2(&params, &l_i_mult_l_i_sub_l_i_sub_z).expect("commitment failed");
-        //now to calculate the cross terms and for i=j l_i^2-l_i
-        let mut cross_terms = Vec::new();
-        for j in 0..n+1 {
-            if j != 1 {
-                let l_j_of_x = utils::lagrange_poly(n, j);
-                cross_terms.push((l_j_of_x.mul(&l_i_of_x)).div(&z_of_x)) ;
-            }
-            else {
-                cross_terms.push((l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x)).div(&z_of_x)) ;
-            }
-        }
-        //to compute commitments to the cross terms 
-        let mut cross_terms_com = Vec::with_capacity(n) ;
-        for j in 0..n+1 {
-                cross_terms_com.push(KZG::commit_g2(&params, &cross_terms[j]).expect("commitment failed"));
+    //     //l_i^2-l_i
+    //     //let l_i_mult_l_i_sub_l_i = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
+    //     //(l_i^2-l_i)/Z())
+    //    // let l_i_mult_l_i_sub_l_i_sub_z = l_i_mult_l_i_sub_l_i.div(&z_of_x) ;
+    //     //[(l_i^2-l_i)/Z())]
+    //     //let l_i_mult_l_i_sub_l_i_sub_z_com = KZG::commit_g2(&params, &l_i_mult_l_i_sub_l_i_sub_z).expect("commitment failed");
+    //     //now to calculate the cross terms and for i=j l_i^2-l_i
+    //     let mut cross_terms = Vec::new();
+    //     for j in 0..n+1 {
+    //         if j != 1 {
+    //             let l_j_of_x = utils::lagrange_poly(n, j);
+    //             cross_terms.push((l_j_of_x.mul(&l_i_of_x)).div(&z_of_x)) ;
+    //         }
+    //         else {
+    //             cross_terms.push((l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x)).div(&z_of_x)) ;
+    //         }
+    //     }
+    //     //to compute commitments to the cross terms 
+    //     let mut cross_terms_com = Vec::with_capacity(n) ;
+    //     for j in 0..n+1 {
+    //             cross_terms_com.push(KZG::commit_g2(&params, &cross_terms[j]).expect("commitment failed"));
                    
-        }
+    //     }
     
-        let x_monomial = utils::compute_x_monomial();
-        let l_i_of_0 = l_i_of_x.evaluate(&F::from(0));
-        let l_i_of_0_poly = utils::compute_constant_poly(&l_i_of_0);
+    //     let x_monomial = utils::compute_x_monomial();
+    //     let l_i_of_0 = l_i_of_x.evaluate(&F::from(0));
+    //     let l_i_of_0_poly = utils::compute_constant_poly(&l_i_of_0);
     
-        //numerator is l_i(x) - l_i(0)
-        let l_i_sub_l_i_zero = l_i_of_x.sub(&l_i_of_0_poly);
-        //denominator is x
-        let den = x_monomial.clone();
+    //     //numerator is l_i(x) - l_i(0)
+    //     let l_i_sub_l_i_zero = l_i_of_x.sub(&l_i_of_0_poly);
+    //     //denominator is x
+    //     let den = x_monomial.clone();
     
-        //qx_term = (l_i(x) - l_i(0)) / x
-        let qx_term = &&l_i_sub_l_i_zero.div(&den);
-        //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
-        let qx_term_com = KZG::commit_g2(&params, &qx_term).expect("commitment failed");
-        // let lhs = <Curve as Pairing>::pairing(hint.qx_i_term, params.powers_of_h[0]);
-        // let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_com);
-        // assert_eq!(lhs, rhs);
+    //     //qx_term = (l_i(x) - l_i(0)) / x
+    //     let qx_term = &&l_i_sub_l_i_zero.div(&den);
+    //     //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
+    //     let qx_term_com = KZG::commit_g2(&params, &qx_term).expect("commitment failed");
+    //     // let lhs = <Curve as Pairing>::pairing(hint.qx_i_term, params.powers_of_h[0]);
+    //     // let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_com);
+    //     // assert_eq!(lhs, rhs);
     
-        //qx_term_mul_tau = (l_i(x) - l_i(0))
-        let qx_term_mul_tau = &l_i_sub_l_i_zero;
-        //qx_term_mul_tau_com = [ (l_i(τ) - l_i(0)) ]_1
-        let qx_term_mul_tau_com = KZG::commit_g2(&params, &qx_term_mul_tau).expect("commitment failed");
+    //     //qx_term_mul_tau = (l_i(x) - l_i(0))
+    //     let qx_term_mul_tau = &l_i_sub_l_i_zero;
+    //     //qx_term_mul_tau_com = [ (l_i(τ) - l_i(0)) ]_1
+    //     let qx_term_mul_tau_com = KZG::commit_g2(&params, &qx_term_mul_tau).expect("commitment failed");
     
-        let mut hints_linear_comb_right = vec![] ;
-        hints_linear_comb_right.push(l_i_of_tau_com) ;
-        hints_linear_comb_right.push(qx_term_com) ;
-        hints_linear_comb_right.push(qx_term_mul_tau_com) ;
-        for i in 0..n {
-            hints_linear_comb_right.push(cross_terms_com[i]) ;
-        }
+        // let mut hints_linear_comb_right = vec![] ;
+        // hints_linear_comb_right.push(l_i_of_tau_com) ;
+        // hints_linear_comb_right.push(qx_term_com) ;
+        // hints_linear_comb_right.push(qx_term_mul_tau_com) ;
+        // for i in 0..n {
+        //     hints_linear_comb_right.push(cross_terms_com[i]) ;
+        // }
 
-        let mut random_integer:u128 = 1 ;
+        let mut hints_linear_comb_right = vec![] ;
+        let h = params.powers_of_h[0];
+        hints_linear_comb_right.push((h.mul(F::from(1))).into()) ;
+        hints_linear_comb_right.push((h.mul(F::from(2))).into()) ;
+        hints_linear_comb_right.push((h.mul(F::from(3))).into() );
+        for i in 0..n {
+            hints_linear_comb_right.push(h) ;
+        }
+    
+
+        let mut random_integer = F::rand(&mut rng) ;
         for _j in 0..n+3 {
-            random_numbers.push(F::from(random_integer)) ;
-            random_integer = (random_integer * random_integer) as u128 ;
+            random_numbers.push(random_integer) ;
+            random_integer = F::from((random_integer * random_integer))  ;
         }
     let start = Instant::now() ;
-     for i in 0..n {
+     for i in 0..10 {
         
             let lhs_pipenger = <<Curve as Pairing>::G1 as VariableBaseMSM>
             ::msm(&hints_linear_comb_left[..], &random_numbers).unwrap().into_affine() ;
