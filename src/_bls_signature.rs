@@ -27,6 +27,7 @@ use hmac::Hmac;
 use sha2::{Digest, Sha256};
 
 use crate::kzg::*;
+use crate::utils::* ;
 
 
 type Curve = Bls12_381;

@@ -1,5 +1,11 @@
+//use std::ptr::metadata;
+#![allow(unused_imports)]
 use std::time::Instant;
 use std::sync::Arc;
+use serde::{Serialize, Deserialize,};
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter, Write, Seek, SeekFrom, Read};
+
 //use pprof::ProfilerGuard;
 
 //use rand::SeedableRng;
@@ -17,7 +23,7 @@ use aes::cipher::{BlockEncrypt, KeyInit,
     generic_array::GenericArray,
 };
 
-use ark_serialize::CanonicalSerialize;
+use ark_serialize::{CanonicalSerialize, SerializationError, CanonicalDeserialize, Compress, Valid, Validate};
 use ark_ff::{Field, biginteger::BigInteger256};
 use ark_poly::{
     Polynomial,
@@ -41,6 +47,7 @@ use kzg::*;
 
 mod utils;
 mod kzg;
+mod hintgen;
 mod _bls_signature;
 //mod pippengerTesting;
 
@@ -159,7 +166,9 @@ struct Proof {
 
 /// Hint contains all material output by a party during the setup phase
 #[allow(dead_code)]
-#[derive(Clone)]
+
+#[derive(CanonicalSerialize, CanonicalDeserialize,Clone,Debug, PartialEq, Eq)]
+//#[derive(Serialize, Deserialize, Debug)]
 struct Hint {
     /// index in the address book
     i: usize,
@@ -176,6 +185,26 @@ struct Hint {
     qx_i_term: G1,
     /// [ sk_i ((L_i(τ) - L_i(0))]_1
     qx_i_term_mul_tau: G1,
+}
+
+//hint independent one time setup computations
+#[derive(CanonicalSerialize, CanonicalDeserialize,Clone,Debug, PartialEq, Eq)]
+struct HintIndependentSetupElements {
+    i: usize,
+    /// public key pk = [sk]_1
+   // pk_i: G1,
+    /// [ sk_i L_i(τ) ]_1
+    //sk_i_l_i_of_tau_com_1: G1,
+    /// [ sk_i L_i(τ) ]_2
+    l_i_of_tau_com_2: G2,
+    /// qz_i_terms[i] = [ sk_i * ((L_i^2(τ) - L_i(τ)) / Z(τ)) ]_1
+    /// \forall j != i, qz_i_terms[j] = [ sk_i * (L_i(τ) * L_j(τ) / Z(τ)) ]_1
+    qz_i_terms: Vec<G2>,
+    /// [ sk_i ((L_i(τ) - L_i(0)) / τ ]_1
+    qx_i_term: G2,
+    /// [ sk_i ((L_i(τ) - L_i(0))]_1
+    qx_i_term_mul_tau: G2,
+
 }
 
 /// AggregationKey contains all material needed by Prover to produce a hinTS proof
@@ -411,9 +440,120 @@ fn partial_signatures_verification(partial_sig_vec: &Vec<PartialSig>,message: &V
 
 }
 
+// fn write_structs_to_file(file_path: &str, structs: &[Hint]) -> io::Result<()> {
+//     let file = File::create(file_path)?;
+//     let writer = BufWriter::new(file);
+//     serde_json::to_writer(writer, &structs)?;
+//     Ok(())
+// }
+#[allow(dead_code)]
+fn write_hints_to_file(hints: &Vec<Hint>, path: &str, _n:usize) -> Result<(), SerializationError> {
+    //let mut file = File::create(path).map_err(|_| SerializationError::IoError) ;
+   //let mut file = BufReader::new(File::open(path).map_err(SerializationError::IoError)?);
+    let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
+
+
+    // let mut file = File::options()
+    //         .write(true)
+    //         .create(true)
+    //         .open(path)
+    //         .map_err(SerializationError::IoError)?;
+    // let mut buffer = [0; 1];
+    // let is_empty = match file.read(&mut buffer) {
+    //         Ok(0) => true,   // If no bytes were read, the file is empty
+    //         Ok(_) => false,  // If any bytes were read, the file has content
+    //         Err(e) => return Err(SerializationError::IoError(e)),
+    // };
+
+    //     // If the file is not empty, check the hint count stored at the start of the file
+    // if !is_empty {
+    //         // Seek to the start of the file to read the stored hint count
+    //         file.seek(SeekFrom::Start(0)).map_err(SerializationError::IoError)?;
+    //         let stored_hint_count = u64::deserialize_uncompressed(&mut file)? as usize;
+
+    //         // If the hint count matches `n`, skip writing to the file
+    //         if stored_hint_count == n {
+    //             println!("The file already contains the required number of hints. Skipping write.");
+    //             return Ok(());
+    //         }
+    // }
+       println!("Writing hints") ;
+        // Clear the file before writing new data if necessary
+        // file.set_len(0).map_err(SerializationError::IoError)?;
+
+        // // Seek back to the start of the file for writing
+        // file.seek(SeekFrom::Start(0)).map_err(SerializationError::IoError)?;
+
+        // Write the number of `Hint` structs at the beginning of the file
+        (hints.len() as u64).serialize_uncompressed(&mut file)?;
+
+        // Serialize each `Hint` in the vector
+        for hint in hints {
+            hint.i.serialize_uncompressed(&mut file)?;
+            hint.pk_i.serialize_uncompressed(&mut file)?;
+            hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut file)?;
+            hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
+
+            // Serialize `qz_i_terms` vector length and elements
+            (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut file)?;
+            for term in &hint.qz_i_terms {
+                term.serialize_uncompressed(&mut file)?;
+            }
+
+            hint.qx_i_term.serialize_uncompressed(&mut file)?;
+            hint.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
+        }
+
+        Ok(())
+    }
+
+
+
+fn read_hints_from_file(path: &str) -> Result<Vec<Hint>, SerializationError> {
+    let mut file = File::open(path).map_err(SerializationError::IoError)?;
+    
+
+    let hint_count = u64::deserialize_uncompressed(&mut file)? as usize;
+    let mut hints = Vec::with_capacity(hint_count);
+
+    // Deserialize each field from the file
+    for _ in 0..hint_count {
+        let i = usize::deserialize_uncompressed(&mut file)?;
+    let pk_i = G1::deserialize_uncompressed(&mut file)?;
+    let sk_i_l_i_of_tau_com_1 = G1::deserialize_uncompressed(&mut file)?;
+    let sk_i_l_i_of_tau_com_2 = G2::deserialize_uncompressed(&mut file)?;
+
+    // Deserialize the length of `qz_i_terms` and then each element
+    let qz_i_terms_len = u64::deserialize_uncompressed(&mut file)? as usize;
+    let mut qz_i_terms = Vec::with_capacity(qz_i_terms_len);
+    for _ in 0..qz_i_terms_len {
+        qz_i_terms.push(G1::deserialize_uncompressed(&mut file)?);
+    }
+
+    let qx_i_term = G1::deserialize_uncompressed(&mut file)?;
+    let qx_i_term_mul_tau = G1::deserialize_uncompressed(&mut file)?;
+
+    hints.push(Hint{
+        i,
+        pk_i,
+        sk_i_l_i_of_tau_com_1,
+        sk_i_l_i_of_tau_com_2,
+        qz_i_terms,
+        qx_i_term,
+        qx_i_term_mul_tau,
+    })
+
+
+    }
+
+   
+    
+    Ok(hints)
+}
+
 fn main() {
     //universe size is n 
-    let n = 32;
+    let n = 128;
     println!("n = {}", n);
 
     //committee size is c
@@ -428,38 +568,31 @@ fn main() {
     //run KZG setup
     let rng = &mut test_rng();
     let start = Instant::now();
-    let params = KZG::setup(n, rng).expect("Setup failed");
+    let params: UniversalParams<ark_ec::bls12::Bls12<ark_bls12_381::Config>> = KZG::setup(n, rng).expect("Setup failed");
     let params = Arc::new(params) ;
     let duration = start.elapsed();
     println!("Time elapsed in KZG setup is: {:?}", duration);
 
     // -------------- sample universe specific values ---------------
     //sample random keys
-    let mut sk: Vec<F> = sample_secret_keys(n - 1);
-    sk.push(F::from(0));
-
+    let sk = hintgen::read_secret_keys("secret_keys.bin").unwrap() ;
+   
     let start = Instant::now();
-    let all_parties_setup = crossbeam::scope(|s| {
-        let mut threads = Vec::new();
-        for i in 0..n {
-            //let idx = i.clone();
-            //let n = n.clone();
-            let sk = sk[i];
-            let params = Arc::clone(&params) ;
-           // println!("Spawning thread for index: {}", i) ;
-            let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-            threads.push(thread_i);
-        }
-
-        threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-    }).unwrap();
+    let all_parties_setup = read_hints_from_file("hints_test_data.bin").unwrap() ;
     let duration = start.elapsed();
     println!("Time elapsed in hint generation is: {:?}", duration);
+    //sample random weights for each party
+    //let weights = sample_weights(n - 1);
+
+    let start = Instant::now();
+    let all_parties_independent_setup = read_hints_independent_compu_from_file("setup_requirements.bin").unwrap() ;
+    let duration = start.elapsed();
+    println!("Time elapsed in hint independent computation is: {:?}", duration);
     //sample random weights for each party
     let weights = sample_weights(n - 1);
 
     let start = Instant::now();
-    let (vk, ak) = setup(n, c,&params, &weights,  &all_parties_setup);
+    let (vk, ak) = setup(n, c,&params, &weights,  &all_parties_setup, &all_parties_independent_setup);
     let duration = start.elapsed();
     println!("Time elapsed in setup is: {:?}", duration);
 
@@ -543,7 +676,8 @@ fn setup(
     params: &UniversalParams<Curve>,
     w: &Vec<F>,
     //sk: &Vec<F>,
-    all_parties_setup: &Vec<Hint>
+    all_parties_setup: &Vec<Hint>,
+    all_parties_independent_setup: &Vec<HintIndependentSetupElements>,
 ) -> (VerificationKey, AggregationKey)
 {
     let mut weights = w.clone();
@@ -578,13 +712,9 @@ fn setup(
     //     threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
     // }).unwrap();
 
-    crossbeam::scope(|s| {
-        for  hint in all_parties_setup{
-            s.spawn(move |_| {
-                verify_hint(params, &hint);
-            });
-        }
-    }).unwrap(); 
+    for i in 0..n {
+        verify_hint(params, &all_parties_setup[i], &all_parties_independent_setup[i]);
+    }
 
     for hint in all_parties_setup {
         //verify hint
@@ -1310,14 +1440,7 @@ fn get_zero_poly_com_g2(params: &UniversalParams<Curve>) -> G2 {
     KZG::commit_g2(&params, &zero_poly).unwrap()
 }
 
-fn sample_secret_keys(num_parties: usize) -> Vec<F> {
-    let mut rng = test_rng();
-    let mut keys = vec![];
-    for _ in 0..num_parties {
-        keys.push(F::rand(&mut rng));
-    }
-    keys
-}
+
 
 fn compute_psw_poly(weights: &Vec<F>, bitmap: &Vec<F>) -> DensePolynomial<F> {
     let n = weights.len();
@@ -1334,93 +1457,11 @@ fn compute_psw_poly(weights: &Vec<F>, bitmap: &Vec<F>) -> DensePolynomial<F> {
     eval_form.interpolate()    
 }
 
-fn hint_gen(
-    params: &UniversalParams<Curve>,
-    n: usize, 
-    i: usize, 
-    sk_i: &F) -> Hint {
-    //let us compute the q1 term
-    let l_i_of_x = utils::lagrange_poly(n, i);
-    let z_of_x = utils::compute_vanishing_poly(n);
-
-    let mut qz_terms = vec![];
-    //let us compute the cross terms of q1
-    for j in 0..n {
-        let num: DensePolynomial<F>;// = compute_constant_poly(&F::from(0));
-        if i == j {
-            num = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
-        } else { //cross-terms
-            let l_j_of_x = utils::lagrange_poly(n, j);
-            num = l_j_of_x.mul(&l_i_of_x);
-        }
-
-        let f = num.div(&z_of_x);
-        let sk_times_f = utils::poly_eval_mult_c(&f, &sk_i);
-
-        let com = KZG::commit_g1(&params, &sk_times_f)
-            .expect("commitment failed");
-
-        qz_terms.push(com);
-    }
-
-    let x_monomial = utils::compute_x_monomial();
-    let l_i_of_0 = l_i_of_x.evaluate(&F::from(0));
-    let l_i_of_0_poly = utils::compute_constant_poly(&l_i_of_0);
-
-    //numerator is l_i(x) - l_i(0)
-    let num = l_i_of_x.sub(&l_i_of_0_poly);
-    //denominator is x
-    let den = x_monomial.clone();
-    //qx_term = sk_i * (l_i(x) - l_i(0)) / x
-    let qx_term = utils::poly_eval_mult_c(&num.div(&den), &sk_i);
-    //qx_term_mul_tau = sk_i * (l_i(x) - l_i(0)) / x
-    let qx_term_mul_tau = utils::poly_eval_mult_c(&num, &sk_i);
-    //qx_term_com = [ sk_i * (l_i(τ) - l_i(0)) / τ ]_1
-    let qx_term_com = KZG::commit_g1(&params, &qx_term).expect("commitment failed");
-    //qx_term_mul_tau_com = [ sk_i * (l_i(τ) - l_i(0)) ]_1
-    let qx_term_mul_tau_com = KZG::commit_g1(&params, &qx_term_mul_tau).expect("commitment failed");
-
-    //release my public key
-    let sk_as_poly = utils::compute_constant_poly(&sk_i);
-    let pk = KZG::commit_g1(&params, &sk_as_poly).expect("commitment failed");
-   
-
-    let sk_times_l_i_of_x = utils::poly_eval_mult_c(&l_i_of_x, &sk_i);
-    let com_sk_l_i_g1 = KZG::commit_g1(&params, &sk_times_l_i_of_x).expect("commitment failed");
-    let com_sk_l_i_g2 = KZG::commit_g2(&params, &sk_times_l_i_of_x).expect("commitment failed");
-
-    Hint {
-        i: i,
-        pk_i: pk,
-        sk_i_l_i_of_tau_com_1: com_sk_l_i_g1,
-        sk_i_l_i_of_tau_com_2: com_sk_l_i_g2,
-        qz_i_terms: qz_terms,
-        qx_i_term: qx_term_com,
-        qx_i_term_mul_tau: qx_term_mul_tau_com,
-    }
-}
-#[allow(dead_code)]
-fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
-    let i = hint.i;
-    let n = hint.qz_i_terms.len();
-    //println!("hint.qz_i_terms er length is {}",hint.qz_i_terms.len()) ;
-
-    //e([sk_i L_i(τ)]1, [1]2) = e([sk_i]1, [L_i(τ)]2)
+fn hint_independent_computation(n:usize,params: &UniversalParams<Curve>,i:usize)-> HintIndependentSetupElements {
     let l_i_of_x = utils::lagrange_poly(n, i);
     let z_of_x = utils::compute_vanishing_poly(n);
 
     let l_i_of_tau_com = KZG::commit_g2(&params, &l_i_of_x).expect("commitment failed");
-    // let lhs = <Curve as Pairing>::pairing(hint.sk_i_l_i_of_tau_com_1, params.powers_of_h[0]);
-    // let rhs = <Curve as Pairing>::pairing(hint.pk_i, l_i_of_tau_com);
-    // assert_eq!(lhs, rhs);
-
-    //l_i^2-l_i
-    //let l_i_mult_l_i_sub_l_i = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
-    //(l_i^2-l_i)/Z())
-   // let l_i_mult_l_i_sub_l_i_sub_z = l_i_mult_l_i_sub_l_i.div(&z_of_x) ;
-    //[(l_i^2-l_i)/Z())]
-    //let l_i_mult_l_i_sub_l_i_sub_z_com = KZG::commit_g2(&params, &l_i_mult_l_i_sub_l_i_sub_z).expect("commitment failed");
-    //now to calculate the cross terms and for i=j l_i^2-l_i
     let mut cross_terms = Vec::new();
     for j in 0..n+1 {
         if j != i {
@@ -1437,30 +1478,9 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
             cross_terms_com.push(KZG::commit_g2(&params, &cross_terms[j]).expect("commitment failed"));
                
     }
-
-    // for j in 0..n {
-    //     let num: DensePolynomial<F>;
-    //     if i == j {
-    //         num = l_i_of_x.clone().mul(&l_i_of_x).sub(&l_i_of_x);
-    //     } else { //cross-terms
-    //         let l_j_of_x = utils::lagrange_poly(n, j);
-    //         num = l_j_of_x.mul(&l_i_of_x);
-    //     }
-    //     let f = num.div(&z_of_x);
-
-    //     //f = li^2 - l_i / z or li lj / z
-    //     let f_com = KZG::commit_g2(&params, &f).expect("commitment failed");
-        
-    //     let lhs = <Curve as Pairing>::pairing(hint.qz_i_terms[j], params.powers_of_h[0]);
-    //     let rhs = <Curve as Pairing>::pairing(hint.pk_i, f_com);
-    //     assert_eq!(lhs, rhs);
-    // }
-
     let x_monomial = utils::compute_x_monomial();
     let l_i_of_0 = l_i_of_x.evaluate(&F::from(0));
     let l_i_of_0_poly = utils::compute_constant_poly(&l_i_of_0);
-
-    //numerator is l_i(x) - l_i(0)
     let l_i_sub_l_i_zero = l_i_of_x.sub(&l_i_of_0_poly);
     //denominator is x
     let den = x_monomial.clone();
@@ -1477,9 +1497,20 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     let qx_term_mul_tau = &l_i_sub_l_i_zero;
     //qx_term_mul_tau_com = [ (l_i(τ) - l_i(0)) ]_1
     let qx_term_mul_tau_com = KZG::commit_g2(&params, &qx_term_mul_tau).expect("commitment failed");
-    // let lhs = <Curve as Pairing>::pairing(hint.qx_i_term_mul_tau, params.powers_of_h[0]);
-    // let rhs = <Curve as Pairing>::pairing(hint.pk_i, qx_term_mul_tau_com);
-    // assert_eq!(lhs, rhs);
+    HintIndependentSetupElements{
+        i: i,
+        l_i_of_tau_com_2: l_i_of_tau_com,
+        qz_i_terms: cross_terms_com,
+        qx_i_term: qx_term_com,
+        qx_i_term_mul_tau: qx_term_mul_tau_com,
+    }
+
+
+}
+
+#[allow(dead_code)]
+fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint, hint_independents: &HintIndependentSetupElements) {
+    let n = hint.qz_i_terms.len() ;
     //take n+3 no of random numbers to compute a random linear combination
     let mut random_numbers = Vec::with_capacity(n+3) ;
     let mut rng = ark_std::test_rng();
@@ -1498,11 +1529,11 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     }
 
     let mut hints_linear_comb_right = vec![] ;
-    hints_linear_comb_right.push(l_i_of_tau_com) ;
-    hints_linear_comb_right.push(qx_term_com) ;
-    hints_linear_comb_right.push(qx_term_mul_tau_com) ;
+    hints_linear_comb_right.push(hint_independents.l_i_of_tau_com_2) ;
+    hints_linear_comb_right.push(hint_independents.qx_i_term) ;
+    hints_linear_comb_right.push(hint_independents.qx_i_term_mul_tau) ;
     for i in 0..n {
-        hints_linear_comb_right.push(cross_terms_com[i]) ;
+        hints_linear_comb_right.push(hint_independents.qz_i_terms[i]) ;
     }
 
 
@@ -1518,6 +1549,84 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint) {
     assert_eq!(lhs,rhs) ;
 
 }
+#[allow(dead_code)]
+fn generate_hints_independent_compu_and_write (
+    params: &UniversalParams<Curve>,
+    n: usize,  
+    path: &str) -> Result<(), SerializationError> {
+        let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
+        let params = Arc::new(params) ;
+        let hints_independent_elements = crossbeam::scope(|s| {
+            let mut threads = Vec::new();
+            for i in 0..n {
+                //let idx = i.clone();
+                //let n = n.clone();
+                //let sk = sk[i];
+                let params = Arc::clone(&params) ;
+               // println!("Spawning thread for index: {}", i) ;
+                let thread_i = s.spawn(move |_| hint_independent_computation( n, &params, i));
+                threads.push(thread_i);
+            }
+    
+            threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+        }).unwrap();
+
+        (hints_independent_elements.len() as u64).serialize_uncompressed(&mut file)?;
+
+        // Serialize each `Hint` in the vector
+        for temp in hints_independent_elements {
+            temp.i.serialize_uncompressed(&mut file)?;
+            temp.l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
+            temp.qx_i_term.serialize_uncompressed(&mut file)?;
+            temp.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
+
+            // Serialize `qz_i_terms` vector length and elements
+            ((temp.qz_i_terms).len() as u64).serialize_uncompressed(&mut file)?;
+            for term in &temp.qz_i_terms {
+                term.serialize_uncompressed(&mut file)?;
+            }
+        }
+
+        Ok(())
+
+    }
+
+        fn read_hints_independent_compu_from_file(path: &str) -> Result<Vec<HintIndependentSetupElements>, SerializationError> {
+            let mut file = File::open(path).map_err(SerializationError::IoError)?;
+            
+        
+            let hint_ind_count = u64::deserialize_uncompressed(&mut file)? as usize;
+            let mut hints_independent_compu = Vec::with_capacity(hint_ind_count);
+        
+            // Deserialize each field from the file
+            for _ in 0..hint_ind_count {
+                let i = usize::deserialize_uncompressed(&mut file)?;
+                let l_i_of_tau_com_2 = G2::deserialize_uncompressed(&mut file)?;
+                let qx_i_term = G2::deserialize_uncompressed(&mut file)?;
+                let qx_i_term_mul_tau = G2::deserialize_uncompressed(&mut file)?;
+            // Deserialize the length of `qz_i_terms` and then each element
+            let qz_i_terms_len = u64::deserialize_uncompressed(&mut file)? as usize;
+            let mut qz_i_terms = Vec::with_capacity(qz_i_terms_len);
+            for _ in 0..qz_i_terms_len {
+                qz_i_terms.push(G2::deserialize_uncompressed(&mut file)?);
+            }
+        
+            hints_independent_compu.push(HintIndependentSetupElements{
+                i,
+                l_i_of_tau_com_2,
+                qz_i_terms,
+                qx_i_term,
+                qx_i_term_mul_tau,
+            })
+        
+        
+            }
+        
+           
+            
+            Ok(hints_independent_compu)
+        }
+    
 
 #[cfg(test)]
 mod tests {
@@ -1697,7 +1806,7 @@ mod tests {
         let params = KZG::setup(n, rng).expect("Setup failed");
     
     
-        let sks: Vec<F> = sample_secret_keys(n-1) ;
+        let sks: Vec<F> = hintgen::sample_secret_keys(n-1) ;
         let mut pks: Vec<G1> = vec![] ;
         for i in 0..n-1 {
             let sk_as_poly = utils::compute_constant_poly(&sks[i]) ;
@@ -1723,7 +1832,7 @@ mod tests {
 
         let n = bitmap.len();
 
-        let mut secret_keys: Vec<F> = sample_secret_keys(n - 1);
+        let mut secret_keys: Vec<F> = hintgen::sample_secret_keys(n - 1);
         secret_keys.push(F::from(0));
 
         let agg_sk = aggregate_sk(&secret_keys, &bitmap);
@@ -1798,7 +1907,7 @@ mod tests {
     }
     #[test]
     fn test_pipenger() {
-        let n = 524288; 
+        let n = 1024; 
         let mut rng = ark_std::test_rng();
         let params = KZG::setup(n, &mut rng).expect("Setup failed");
         let mut random_numbers = Vec::with_capacity(n+3) ;
@@ -1906,6 +2015,104 @@ mod tests {
 
        
     }
+   
+   #[test]
+    fn generate_hints_and_sks_for_32() {
+        let n = 32;
+        let rng = &mut test_rng() ;
+        hintgen::write_secret_keys(n, "secret_keys.bin");
+        let sk = hintgen::read_secret_keys("secret_keys.bin").unwrap();
+        let params = KZG::setup(n,rng).unwrap() ;
+        hintgen::generate_hints_and_write(&params, n, sk, "hints_test_data.bin") ;
+        generate_hints_independent_compu_and_write(&params, n, "setup_requirements.bin") ;
     
+    }
+    #[test]
+    fn generate_hints_independents_32() {
+        let n = 32;
+        let rng = &mut test_rng() ;
+        let params = KZG::setup(n,rng).unwrap() ;
+        generate_hints_independent_compu_and_write(&params, n, "setup_requirements.bin") ;
+    
+    }
+
+    #[test]
+    fn generate_hints_and_sks_for_64() {
+        let n = 64;
+        let rng = &mut test_rng() ;
+        hintgen::write_secret_keys(n, "secret_keys.bin");
+        let sk = hintgen::read_secret_keys("secret_keys.bin").unwrap();
+        let params = KZG::setup(n,rng).unwrap() ;
+         let start = Instant::now() ;
+
+        hintgen::generate_hints_and_write(&params, n, sk, "hints_test_data.bin") ;
+        let duration = start.elapsed();
+        println!("time to generate hints is {:?}",duration) ;
+    
+
+    }
+    #[test]
+    fn generate_hints_independents_64() {
+        let n = 64;
+        let rng = &mut test_rng() ;
+        let params = KZG::setup(n,rng).unwrap() ;
+        let start = Instant::now() ;
+        generate_hints_independent_compu_and_write(&params, n, "setup_requirements.bin") ;
+        let duration = start.elapsed();
+        println!("time to compute hints independent setup elements is {:?}",duration);
+    
+    }
+    #[test]
+    fn generate_hints_and_sks_for_128() {
+        let n = 128;
+        let rng = &mut test_rng() ;
+        hintgen::write_secret_keys(n, "secret_keys.bin");
+        let sk = hintgen::read_secret_keys("secret_keys.bin").unwrap();
+        let params = KZG::setup(n,rng).unwrap() ;
+        hintgen::generate_hints_and_write(&params, n, sk, "hints_test_data.bin") ;
+        let start = Instant::now() ;
+        let hints = read_hints_from_file("hints_test_data.bin");
+        let duration = start.elapsed();
+        println!("time to read hints is {:?}",duration) ;
+    
+    
+    }
+    #[test]
+    fn generate_hints_independents_128() {
+        let n = 128;
+        let rng = &mut test_rng() ;
+        let params = KZG::setup(n,rng).unwrap() ;
+        let start = Instant::now() ;
+        generate_hints_independent_compu_and_write(&params, n, "setup_requirements.bin") ;
+        let duration = start.elapsed();
+        println!("time to generate hints independent computations are {:?}",duration);
+    
+    }
+    #[test]
+    fn generate_hints_and_sks_for_256() {
+        let n = 256;
+        let rng = &mut test_rng() ;
+        hintgen::write_secret_keys(n, "secret_keys.bin");
+        let sk = hintgen::read_secret_keys("secret_keys.bin").unwrap();
+        let params = KZG::setup(n,rng).unwrap() ;
+        hintgen::generate_hints_and_write(&params, n, sk, "hints_test_data.bin") ;
+        let start = Instant::now() ;
+        let hints = read_hints_from_file("hints_test_data.bin");
+        let duration = start.elapsed();
+        println!("time to read hints is {:?}",duration) ;
+    
+    
+    }
+    #[test]
+    fn generate_hints_independents_256() {
+        let n = 256;
+        let rng = &mut test_rng() ;
+        let params = KZG::setup(n,rng).unwrap() ;
+        let start = Instant::now() ;
+        generate_hints_independent_compu_and_write(&params, n, "setup_requirements.bin") ;
+        let duration = start.elapsed();
+        println!("time to generate hints independent computations are {:?}",duration);
+    
+    }
 
 }

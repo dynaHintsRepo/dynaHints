@@ -7,7 +7,25 @@ use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_ec::{scalar_mul::fixed_base::FixedBase, VariableBaseMSM};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
 use ark_poly::DenseUVPolynomial;
-use ark_std::{format, marker::PhantomData, ops::*, vec};
+use ark_std::{format, marker::PhantomData, ops::*, vec,test_rng};
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter, Write, Seek, SeekFrom, Read};
+use ark_poly::{
+    Polynomial,
+    univariate::DensePolynomial, 
+    EvaluationDomain, 
+    Radix2EvaluationDomain,
+    Evaluations
+};
+use ark_bls12_381::Bls12_381;
+
+type Curve = Bls12_381;
+type F = ark_bls12_381::Fr;
+type G1 = <Curve as Pairing>::G1Affine;
+type G2 = <Curve as Pairing>::G2Affine;
+
+
+use ark_serialize::{CanonicalSerialize, SerializationError, CanonicalDeserialize, Compress, Valid, Validate};
 
 use ark_std::rand::RngCore;
 #[cfg(feature = "parallel")]
@@ -224,4 +242,47 @@ fn check_degree_is_too_large(degree: usize, num_powers: usize) -> Result<(), Err
     } else {
         Ok(())
     }
+}
+
+pub fn write_params(n:usize,path: &str)->  Result<(), SerializationError> {
+    type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
+    let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
+    let rng = &mut test_rng();
+    let params = KZG::setup(n, rng).expect("Setup failed");
+   // (params.len() as u64).serialize_uncompressed(&mut file)?;
+   (n as usize).serialize_uncompressed(&mut file)?;
+
+    for i in &params.powers_of_g {
+        i.serialize_uncompressed(&mut file)? ;
+    }
+    for j in &params.powers_of_h {
+        j.serialize_uncompressed(&mut file)? ;
+    }
+        Ok(())
+
+}
+
+pub fn read_params(path: &str) -> Result<UniversalParams<ark_ec::bls12::Bls12<ark_bls12_381::Config>>, SerializationError> {
+    let mut file = File::open(path).map_err(SerializationError::IoError)?;
+
+      
+    
+
+    let n = u64::deserialize_uncompressed(&mut file)? as usize;
+   // let mut sk:Vec<F> = Vec::with_capacity(sk_count);
+
+    // Deserialize each field from the file
+    let mut powers_of_g = vec![] ;
+    let mut powers_of_h = vec![] ;
+    for _ in 0..n {
+        let temp = G1::deserialize_uncompressed(&mut file)? ;
+        powers_of_g.push(temp) ;
+
+    }
+    for _ in 0..n {
+        let temp = G2::deserialize_uncompressed(&mut file)? ;
+        powers_of_h.push(temp) ;
+    }
+    Ok(UniversalParams{powers_of_g,powers_of_h}) 
+
 }
