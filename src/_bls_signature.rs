@@ -1,5 +1,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
+use ark_bls12_377::G1Affine;
+use ark_poly::domain;
 use ark_serialize::CanonicalSerialize;
 use ark_ff::{Field, biginteger::BigInteger256};
 use ark_poly::{
@@ -61,6 +63,35 @@ pub fn sk_to_pk(sk: F, params: &UniversalParams<Curve>) -> G1 {
     p.into() 
 }
 
+pub fn bls_sign_with_dleq(message: &[u8], secret_key: F, domain: &[u8], params: &UniversalParams<Curve>, public_key: G1)-> (G2,F,F) {
+    let hasher = hash_to_point(message,domain) ;
+    let signature = hasher.mul(secret_key).into();
+    let mut rng = test_rng();
+    let r = F::rand(&mut rng);
+    let g = params.powers_of_g[0];
+   
+    let alpha = g.mul(r).into() ;
+    let beta = hasher.mul(r).into();
+    let c = random_oracle_c(g,hasher,public_key,signature,alpha,beta);
+    let s = r + (secret_key * c) ;
+    (signature, c, s)
+}
+
+pub fn bls_verify_with_dleq(message: &[u8], domain: &[u8], public_key: G1, params: &UniversalParams<Curve>, signature: G2, c:F, s:F) {
+    let g = params.powers_of_g[0];
+    let h = hash_to_point(message, domain);
+
+     let x_power_c = public_key.mul(-c) ;
+    //  assert_eq!(x_power_c, g.mul(sk * (-c)));
+    //  assert_eq!(x_power_c+g.mul(s), g.mul(r));
+     let y_power_c = signature.mul(-c);
+    // assert_eq!(y_power_c, h.mul(sk*(-c)));
+    let alpha = (g.mul(s) + x_power_c).into();
+    let beta = (h.mul(s) + y_power_c).into();
+    let c_1 = random_oracle_c(g, h, public_key, signature, alpha, beta);
+    assert_eq!(c,c_1)
+}
+
 pub fn bls_sign(message: &[u8],secret_key: F, domain: &[u8]) -> G2 {
     let hasher = hash_to_point(message,domain) ;
     hasher.mul(secret_key).into()
@@ -73,7 +104,77 @@ pub fn bls_verify(message: &[u8], domain: &[u8], public_key: G1, params: &Univer
     let q = hash_to_point(message, domain) ;
     let rhs = <Curve as Pairing>::pairing(public_key,q) ;
     assert_eq!(lhs,rhs)
+    
 }
+
+pub fn aggregate(signatures: Vec<G2>) -> G2 {
+   
+    // 1 & 2
+    let mut aggregate = signatures[0];
+
+    // 3
+    for signature in signatures.iter().skip(1) {
+        // 6
+        aggregate = aggregate.add(signature).into();
+    }
+    // 7 & 8
+    aggregate
+}
+
+pub fn aggregate_verify(
+    public_keys: Vec<G1>,
+    message: &[u8],
+    signature: G2,
+    domain: &[u8],
+    params: &UniversalParams<Curve>
+)  {
+    let mut apk = public_keys[0] ;
+    for pk in public_keys.iter().skip(1) {
+        apk = apk.add(pk).into() ;
+
+    }
+    bls_verify(message, domain, apk, params, signature);
+
+   
+}
+
+fn random_oracle_c(
+    g: G1,
+    h: G2,
+    x: G1,
+    y: G2,
+    alpha: G1,
+    beta: G2,
+) -> F {
+
+    let mut serialized_data = Vec::new();
+    g.serialize_compressed(&mut serialized_data).unwrap();
+    h.serialize_compressed(&mut serialized_data).unwrap();
+    x.serialize_compressed(&mut serialized_data).unwrap();
+    y.serialize_compressed(&mut serialized_data).unwrap();
+    alpha.serialize_compressed(&mut serialized_data).unwrap();
+    beta.serialize_compressed(&mut serialized_data).unwrap();
+    
+    
+
+
+    let mut hash_result = Sha256::digest(serialized_data.as_slice());
+    hash_result[31] = 0u8; //this makes sure we get a number below modulus
+    let hash_bytes = hash_result.as_slice();
+
+    let mut hash_values: [u64; 4] = [0; 4];
+    hash_values[0] = u64::from_le_bytes(hash_bytes[0..8].try_into().unwrap());
+    hash_values[1] = u64::from_le_bytes(hash_bytes[8..16].try_into().unwrap());
+    hash_values[2] = u64::from_le_bytes(hash_bytes[16..24].try_into().unwrap());
+    hash_values[3] = u64::from_le_bytes(hash_bytes[24..32].try_into().unwrap());
+    //hash_values[3] = u64::from(0u64);
+
+    let bi = BigInteger256::new(hash_values);
+
+    //let input: [u8; 32] = [0u8; 32];
+    F::try_from(bi).unwrap()
+}
+
 
 
 #[test]
@@ -85,7 +186,11 @@ fn test_sign() {
     let params = KZG::setup(n, rng).expect("Setup failed");
     let secret_key = F::rand(&mut rng) ;
     let public_key = sk_to_pk(secret_key, &params) ;
+    let (sig, c, s) = bls_sign_with_dleq(message, secret_key, dst, &params, public_key);
+    bls_verify_with_dleq(message, dst, public_key, &params, sig, c, s);
     let signature = bls_sign(message, secret_key, dst) ;
+    // let (c,s,r) = dleq_prove(secret_key, signature, public_key, &params);
+    // dleq_verify(signature, public_key, &params, c, s, secret_key,r,message,dst);
     bls_verify(message, dst, public_key, &params, signature);
 
 }

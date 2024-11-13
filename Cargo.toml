@@ -1,7 +1,6 @@
 [package]
 name = "state-proof"
 version = "0.0.1"
-repository = "https://github.com/rsinha/state-proof"
 keywords = ["cryptography", "finite-fields", "elliptic-curves", "pairing"]
 categories = ["cryptography"]
 include = ["Cargo.toml", "src", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]

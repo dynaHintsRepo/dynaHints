@@ -2,8 +2,9 @@
 #![allow(unused_imports)]
 use std::time::Instant;
 use std::sync::Arc;
-use serde::{Serialize, Deserialize,};
+//use serde::{Serialize, Deserialize,};
 use std::fs::File;
+use std::io::{self, BufWriter, Write, BufReader, Read};
 //use std::io::{self, BufReader, BufWriter, Write, Seek, SeekFrom, Read};
 use ark_serialize::{CanonicalSerialize, SerializationError, CanonicalDeserialize, Compress, Valid, Validate};
 use ark_ff::{Field, biginteger::BigInteger256};
@@ -34,7 +35,7 @@ type G2 = <Curve as Pairing>::G2Affine;
 
 #[derive(CanonicalSerialize, CanonicalDeserialize,Clone,Debug, PartialEq, Eq)]
 //#[derive(Serialize, Deserialize, Debug)]
-struct Hint {
+pub struct Hint {
     /// index in the address book
     i: usize,
     /// public key pk = [sk]_1
@@ -53,7 +54,7 @@ struct Hint {
 }
 #[allow(dead_code)]
 
-fn hint_gen(
+pub fn hint_gen(
     params: &UniversalParams<Curve>,
     n: usize, 
     i: usize, 
@@ -127,47 +128,130 @@ pub fn sample_secret_keys(num_parties: usize) -> Vec<F> {
     }
     keys
 }
-#[allow(dead_code)]
+// #[allow(dead_code)]
+// pub fn generate_hints_and_write (
+//     params: &UniversalParams<Curve>,
+//     n: usize,  
+//     sk: Vec<F>,
+//     path: &str) -> Result<(), SerializationError> {
+//         let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
+//         let params = Arc::new(params) ;
+//         let hints = crossbeam::scope(|s| {
+//             let mut threads = Vec::new();
+//             for i in 0..n {
+//                 //let idx = i.clone();
+//                 //let n = n.clone();
+//                 let sk = sk[i];
+//                 let params = Arc::clone(&params) ;
+//                // println!("Spawning thread for index: {}", i) ;
+//                 let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+//                 threads.push(thread_i);
+//             }
+    
+//             threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+//         }).unwrap();
+
+//         (hints.len() as u64).serialize_uncompressed(&mut file)?;
+
+//         // Serialize each `Hint` in the vector
+//         for hint in hints {
+//             hint.i.serialize_uncompressed(&mut file)?;
+//             hint.pk_i.serialize_uncompressed(&mut file)?;
+//             hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut file)?;
+//             hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
+
+//             // Serialize `qz_i_terms` vector length and elements
+//             (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut file)?;
+//             for term in &hint.qz_i_terms {
+//                 term.serialize_uncompressed(&mut file)?;
+//             }
+
+//             hint.qx_i_term.serialize_uncompressed(&mut file)?;
+//             hint.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
+//         }
+
+//         Ok(())
+
+//     }
+
+// #[allow(dead_code)]
+// pub fn generate_hints_and_write (
+//     params: &UniversalParams<Curve>,
+//     n: usize,  
+//     sk: Vec<F>,
+//     path: &str,
+//     ) -> Result<(), SerializationError> {
+//         let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
+//         let params = Arc::new(params) ;
+//         let hints = crossbeam::scope(|s| {
+//             let mut threads = Vec::new();
+//             for i in 0..n {
+//                 //let idx = i.clone();
+//                 //let n = n.clone();
+//                 let sk = sk[i];
+//                 let params = Arc::clone(&params) ;
+//                // println!("Spawning thread for index: {}", i) ;
+//                 let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
+//                 threads.push(thread_i);
+//             }
+    
+//             threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
+//         }).unwrap();
+
+//         (hints.len() as u64).serialize_uncompressed(&mut file)?;
+
+//         // Serialize each `Hint` in the vector
+//         for hint in hints {
+//             hint.i.serialize_uncompressed(&mut file)?;
+//             hint.pk_i.serialize_uncompressed(&mut file)?;
+//             hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut file)?;
+//             hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
+
+//             // Serialize `qz_i_terms` vector length and elements
+//             (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut file)?;
+//             for term in &hint.qz_i_terms {
+//                 term.serialize_uncompressed(&mut file)?;
+//             }
+
+//             hint.qx_i_term.serialize_uncompressed(&mut file)?;
+//             hint.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
+//         }
+
+//         Ok(())
+
+//     }
+
+    #[allow(dead_code)]
 pub fn generate_hints_and_write (
     params: &UniversalParams<Curve>,
     n: usize,  
     sk: Vec<F>,
-    path: &str) -> Result<(), SerializationError> {
-        let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
-        let params = Arc::new(params) ;
-        let hints = crossbeam::scope(|s| {
-            let mut threads = Vec::new();
-            for i in 0..n {
-                //let idx = i.clone();
-                //let n = n.clone();
-                let sk = sk[i];
-                let params = Arc::clone(&params) ;
-               // println!("Spawning thread for index: {}", i) ;
-                let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-                threads.push(thread_i);
-            }
+    path: &str,
+    ) -> Result<(), SerializationError> {
+        let file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
+        let mut writer = BufWriter::new(file);
+        //let params = Arc::new(params) ;
+
+        (n as u64).serialize_uncompressed(&mut writer)?;
     
-            threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-        }).unwrap();
+            for i in 0..n {
+                let hint = hint_gen(params, n, i, &sk[i]);
+                hint.i.serialize_uncompressed(&mut writer)?;
+                hint.pk_i.serialize_uncompressed(&mut writer)?;
+                hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut writer)?;
+                hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut writer)?;
+    
+                // Serialize `qz_i_terms` vector length and elements
+                (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut writer)?;
+                for term in &hint.qz_i_terms {
+                    term.serialize_uncompressed(&mut writer)?;
+                }
+    
+                hint.qx_i_term.serialize_uncompressed(&mut writer)?;
+                hint.qx_i_term_mul_tau.serialize_uncompressed(&mut writer)?;
 
-        (hints.len() as u64).serialize_uncompressed(&mut file)?;
-
-        // Serialize each `Hint` in the vector
-        for hint in hints {
-            hint.i.serialize_uncompressed(&mut file)?;
-            hint.pk_i.serialize_uncompressed(&mut file)?;
-            hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut file)?;
-            hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
-
-            // Serialize `qz_i_terms` vector length and elements
-            (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut file)?;
-            for term in &hint.qz_i_terms {
-                term.serialize_uncompressed(&mut file)?;
             }
-
-            hint.qx_i_term.serialize_uncompressed(&mut file)?;
-            hint.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
-        }
+            writer.flush()?;
 
         Ok(())
 
@@ -206,4 +290,27 @@ pub fn generate_hints_and_write (
         sk.push(sk_i) ;
     }
     Ok(sk)
+}
+
+#[test]
+fn test_hint_gen_time_for_1024() {
+    let n = 1024;
+    let rng = &mut test_rng();
+    let params = KZG::setup(n,rng).expect("setup failed") ;
+    let sk = sample_secret_keys(1) ;
+    let start = Instant::now();
+    let _hint = hint_gen(&params, n, 0, &sk[0]) ;
+    let duration = start.elapsed() ;
+    println!("time to generate one hint is {:?}",duration);
+}
+#[test]
+fn test_hint_gen_time_for_2048() {
+    let n = 2048;
+    let rng = &mut test_rng();
+    let params = KZG::setup(n,rng).expect("setup failed") ;
+    let sk = sample_secret_keys(1) ;
+    let start = Instant::now();
+    let _hint = hint_gen(&params, n, 0, &sk[0]) ;
+    let duration = start.elapsed() ;
+    println!("time to generate one hint is {:?}",duration);
 }
