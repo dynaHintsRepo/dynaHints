@@ -1552,6 +1552,7 @@ dependencies = [
  "pprof",
  "rand",
  "rand_chacha",
+ "rayon",
  "serde",
  "serde_json",
  "sha2",

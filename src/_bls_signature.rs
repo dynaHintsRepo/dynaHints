@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
+use std::time::{Duration, Instant};
 use ark_bls12_377::G1Affine;
 use ark_poly::domain;
 use ark_serialize::CanonicalSerialize;
@@ -186,7 +187,10 @@ fn test_sign() {
     let params = KZG::setup(n, rng).expect("Setup failed");
     let secret_key = F::rand(&mut rng) ;
     let public_key = sk_to_pk(secret_key, &params) ;
+    let start = Instant::now();
     let (sig, c, s) = bls_sign_with_dleq(message, secret_key, dst, &params, public_key);
+    let duration = start.elapsed();
+    println!("time to generate partial sig is {:?}",duration) ;
     bls_verify_with_dleq(message, dst, public_key, &params, sig, c, s);
     let signature = bls_sign(message, secret_key, dst) ;
     // let (c,s,r) = dleq_prove(secret_key, signature, public_key, &params);

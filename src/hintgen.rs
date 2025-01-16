@@ -128,100 +128,8 @@ pub fn sample_secret_keys(num_parties: usize) -> Vec<F> {
     }
     keys
 }
-// #[allow(dead_code)]
-// pub fn generate_hints_and_write (
-//     params: &UniversalParams<Curve>,
-//     n: usize,  
-//     sk: Vec<F>,
-//     path: &str) -> Result<(), SerializationError> {
-//         let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
-//         let params = Arc::new(params) ;
-//         let hints = crossbeam::scope(|s| {
-//             let mut threads = Vec::new();
-//             for i in 0..n {
-//                 //let idx = i.clone();
-//                 //let n = n.clone();
-//                 let sk = sk[i];
-//                 let params = Arc::clone(&params) ;
-//                // println!("Spawning thread for index: {}", i) ;
-//                 let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-//                 threads.push(thread_i);
-//             }
-    
-//             threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-//         }).unwrap();
 
-//         (hints.len() as u64).serialize_uncompressed(&mut file)?;
-
-//         // Serialize each `Hint` in the vector
-//         for hint in hints {
-//             hint.i.serialize_uncompressed(&mut file)?;
-//             hint.pk_i.serialize_uncompressed(&mut file)?;
-//             hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut file)?;
-//             hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
-
-//             // Serialize `qz_i_terms` vector length and elements
-//             (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut file)?;
-//             for term in &hint.qz_i_terms {
-//                 term.serialize_uncompressed(&mut file)?;
-//             }
-
-//             hint.qx_i_term.serialize_uncompressed(&mut file)?;
-//             hint.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
-//         }
-
-//         Ok(())
-
-//     }
-
-// #[allow(dead_code)]
-// pub fn generate_hints_and_write (
-//     params: &UniversalParams<Curve>,
-//     n: usize,  
-//     sk: Vec<F>,
-//     path: &str,
-//     ) -> Result<(), SerializationError> {
-//         let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
-//         let params = Arc::new(params) ;
-//         let hints = crossbeam::scope(|s| {
-//             let mut threads = Vec::new();
-//             for i in 0..n {
-//                 //let idx = i.clone();
-//                 //let n = n.clone();
-//                 let sk = sk[i];
-//                 let params = Arc::clone(&params) ;
-//                // println!("Spawning thread for index: {}", i) ;
-//                 let thread_i = s.spawn(move |_| hint_gen(&params, n, i, &sk));
-//                 threads.push(thread_i);
-//             }
-    
-//             threads.into_iter().map(|t| t.join().unwrap()).collect::<Vec<_>>()
-//         }).unwrap();
-
-//         (hints.len() as u64).serialize_uncompressed(&mut file)?;
-
-//         // Serialize each `Hint` in the vector
-//         for hint in hints {
-//             hint.i.serialize_uncompressed(&mut file)?;
-//             hint.pk_i.serialize_uncompressed(&mut file)?;
-//             hint.sk_i_l_i_of_tau_com_1.serialize_uncompressed(&mut file)?;
-//             hint.sk_i_l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
-
-//             // Serialize `qz_i_terms` vector length and elements
-//             (hint.qz_i_terms.len() as u64).serialize_uncompressed(&mut file)?;
-//             for term in &hint.qz_i_terms {
-//                 term.serialize_uncompressed(&mut file)?;
-//             }
-
-//             hint.qx_i_term.serialize_uncompressed(&mut file)?;
-//             hint.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
-//         }
-
-//         Ok(())
-
-//     }
-
-    #[allow(dead_code)]
+#[allow(dead_code)]
 pub fn generate_hints_and_write (
     params: &UniversalParams<Curve>,
     n: usize,  
@@ -256,9 +164,8 @@ pub fn generate_hints_and_write (
         Ok(())
 
     }
-
-    #[allow(dead_code)]
-    pub fn write_secret_keys(n: usize, path: &str) -> Result<(), SerializationError> {
+ #[allow(dead_code)]
+  pub fn write_secret_keys(n: usize, path: &str) -> Result<(), SerializationError> {
         let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
         let mut sk: Vec<F> = sample_secret_keys(n - 1);
         sk.push(F::from(0));
