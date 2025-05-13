@@ -220,6 +220,8 @@ struct VerificationKey {
 }
 //u64::rand(&mut rng)
 
+//this will also work for random weights but we have only checked for equal weights 
+//where weight of every party is taken 1
 fn sample_weights(n: usize) -> Vec<F> {
     //let mut rng = &mut test_rng();
     //without weight setting
@@ -228,6 +230,7 @@ fn sample_weights(n: usize) -> Vec<F> {
     //(0..n).map(|_| F::from(u64::rand(&mut rng))).collect()
 }
 
+//this is to create committee from the vrf output 
 
 fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>) -> Vec<F> {
     
@@ -254,15 +257,12 @@ fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>)
 
          //convert the block in to 128 bit 
          let encrypted_value = u128::from_be_bytes(block.as_slice().try_into().expect("Incorrect length"));
-         //println!("create committee encrypted_value is {:?}",encrypted_value) ;
          //map the encrypted value in the range of the universe size
          let random_number = (encrypted_value % (universe_size as u128)) as u128 ;
          result.insert(random_number as u32);
-         //println!("After insert result length {}",result.len()) ;
          counter += 1;
      }
      let comm: Vec<u32> = result.into_iter().collect() ;
-     //println!("The positions are {:?}",comm) ;
     
      let mut bitmap_com = Vec::with_capacity(universe_size) ;
      for _i in 0..universe_size {
@@ -278,6 +278,7 @@ fn create_committee(com_size: usize, universe_size: usize, vrf_output: &Vec<u8>)
      
      
 }
+
 //creating random t no of signers
 fn create_subset_bitmap(n: usize, bmap: &Vec<F>, thresh: usize)-> Vec<F> {
     let mut sub_map = Vec::with_capacity(n);
@@ -306,12 +307,10 @@ fn create_subset_bitmap(n: usize, bmap: &Vec<F>, thresh: usize)-> Vec<F> {
 }
 
 fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_instan: &mut ECVRF,vrf_message: &[u8], vrf_proof: &Vec<u8>, vrf_pk: &Vec<u8>,params: &UniversalParams<Curve>) {
-    //let mut vrf = ECVRF::from_suite(CipherSuite::SECP256K1_SHA256_TAI).unwrap() ;
-    //let message = vrf_message.clone() ;
-    //let bitmap_committee = b_com.clone() ;
+
     let pi = vrf_proof.clone() ;
     let pk = vrf_pk.clone() ;
-    let start = Instant::now();
+    //let start = Instant::now();
     
     let hash = vrf_instan.proof_to_hash(&pi).unwrap();
     //println!("verify committee hash is {:?}",hash) ;
@@ -324,13 +323,14 @@ fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_
             println!("VRF proof is not valid: {}", e);
         }
     }
-    let duration = start.elapsed();
-    println!("time to verify vrf proof is {:?}",duration);
+    //let duration = start.elapsed();
+    //println!("time to verify vrf proof is {:?}",duration);
     
    
     let mut result = HashSet::new();
    
      let beta1 = &beta.unwrap().clone() ;
+     //let start = Instant::now() ;
      let key:[u8;16] = [beta1[0],beta1[1],beta1[2],beta1[3],beta1[4],
                        beta1[5],beta1[6],beta1[7],beta1[8],beta1[9],
                        beta1[10],beta1[11],beta1[12],beta1[13],beta1[14],
@@ -372,10 +372,13 @@ fn verify_committee(com_size: usize, universe_size: usize, b_com_of_tau: G1,vrf_
     
      let bitmap_com_of_tau = <<Curve as Pairing>::G1 as VariableBaseMSM>
     ::msm(&params.powers_of_g[0..universe_size+1], &bitmap_com).unwrap().into_affine() ;
+    //let duration = start.elapsed() ;
+    //println!("time to compute committee commitment is {:?}",duration) ;
      assert_eq!(bitmap_com_of_tau , b_com_of_tau) ;
     
 }
 
+//partial bls signature generation with discrete log proof
 fn partial_signatures_gen_dleq(universe_size: usize, sk: &Vec<F>, bitmap_signer: &Vec<F>, message: &Vec<u8>, dst: &Vec<u8>, pks: &Vec<G1>,params: &UniversalParams<Curve>)-> Vec<PartialSigDleq> {
     let mut partial_sig_vec = vec![] ;
     for i in 0..universe_size {
@@ -396,6 +399,7 @@ fn partial_signatures_gen_dleq(universe_size: usize, sk: &Vec<F>, bitmap_signer:
 
 }
 
+//partial signature and the discrete log proof verification
 fn partial_signatures_verification_dleq(partial_sig_vec: &Vec<PartialSigDleq>,message: &Vec<u8>,dst: &Vec<u8>,pks: &Vec<G1>,params: &UniversalParams<Curve>) {
     for j in 0..partial_sig_vec.len() {
         let p_sig = &partial_sig_vec[j] ; 
@@ -403,7 +407,8 @@ fn partial_signatures_verification_dleq(partial_sig_vec: &Vec<PartialSigDleq>,me
     }
 
 }
-#[allow(dead_code)]
+
+//generating the lagrange coefficients for hints verification
 fn generate_public_polynomials(n: usize,i: usize, z_of_x: &DensePolynomial<F>) -> PublicPolynomials {
     let l_i_of_x = utils::lagrange_poly(n, i);
     //let z_of_x = utils::compute_vanishing_poly(n);
@@ -433,6 +438,7 @@ fn generate_public_polynomials(n: usize,i: usize, z_of_x: &DensePolynomial<F>) -
     
 }
 
+//all the expensive computation can be implemented using multi threads
 #[allow(dead_code)]
 fn write_public_polynomials(public_polys: &Vec<PublicPolynomials>, path: &str) -> Result<(),SerializationError> {
     let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
@@ -455,8 +461,8 @@ fn write_public_polynomials(public_polys: &Vec<PublicPolynomials>, path: &str) -
 
 }
 
-
-    #[allow(dead_code)]
+//multithreaded implementation 
+ #[allow(dead_code)]
 
 fn generate_public_polys_and_write (
     n: usize,  
@@ -515,8 +521,9 @@ fn read_public_poly_from_file(path: &str, n:usize) -> Result<Vec<PublicPolynomia
 }
 Ok(public_polys)
 
+ }
 
-    }
+ //multithreaded implementation 
 #[allow(dead_code)]
 fn write_hints_to_file(hints: &Vec<Hint>, path: &str, _n:usize) -> Result<(), SerializationError> {
     //let mut file = File::create(path).map_err(|_| SerializationError::IoError) ;
@@ -547,7 +554,7 @@ fn write_hints_to_file(hints: &Vec<Hint>, path: &str, _n:usize) -> Result<(), Se
     }
 
 
-
+//multithreaded implementation 
 fn read_hints_from_file(path: &str) -> Result<Vec<Hint>, SerializationError> {
     let mut file = File::open(path).map_err(SerializationError::IoError)?;
     
@@ -589,7 +596,7 @@ fn read_hints_from_file(path: &str) -> Result<Vec<Hint>, SerializationError> {
     
     Ok(hints)
 }
-
+//multithreaded implementation 
 #[allow(dead_code)]
 fn hint_gen_test(n: usize, i: usize, sk_i: F, params: &UniversalParams<Curve>, pps: &PublicPolynomials) -> Hint {
     let l_i_of_x = &pps.l_i_of_x;
@@ -645,7 +652,7 @@ fn hint_gen_test(n: usize, i: usize, sk_i: F, params: &UniversalParams<Curve>, p
         qx_i_term_mul_tau: qx_term_mul_tau_com,
     }
 }
-
+//multithreaded implementation 
 #[allow(dead_code)]
 fn generate_hint_and_write_test(
     params: &UniversalParams<Curve>,
@@ -717,9 +724,9 @@ fn main() {
     
     //committee size is c 
     let c: usize = match args[2].parse() {
-        Ok(num) if (num & (num -1) == 0) => num,
+        Ok(num) if (num > 0) => num,
         _ => {
-            eprintln!("the argument must be a positive power of 2 ") ;
+            eprintln!("the argument must be a positive number ") ;
             std::process::exit(1) ;
         }
     } ;
@@ -729,7 +736,7 @@ fn main() {
     let t: usize = match args[3].parse() {
         Ok(num) if (num > 0) => num,
         _ => {
-            eprintln!("the argument must be a positive power of 2 ") ;
+            eprintln!("the argument must be a positive number ") ;
             std::process::exit(1) ;
         }
     } ;
@@ -750,22 +757,18 @@ fn main() {
     let secret_key_file = format!("secret_keys{}.bin",n);
     let sk = hintgen::read_secret_keys(&secret_key_file).unwrap() ;
    
-    let start = Instant::now();
+   // read the hints and store it in a vector 
     let hints_file = format!("hints_test_data{}.bin",n) ;
     let all_parties_setup = read_hints_from_file(&hints_file).unwrap() ;
-    let duration = start.elapsed();
-    println!("Time elapsed in reading hint is: {:?}", duration);
-    //sample random weights for each party
-    //let weights = sample_weights(n - 1);
 
-    let start = Instant::now();
+    //reading the hint independent elements that is the lagrange coefficients which is the most expensive computation
+    //and storing them in a vector
     let setup_requirements = format!("setup_requirements{}.bin",n);
     let all_parties_independent_setup = read_hints_independent_compu_from_file(&setup_requirements).unwrap() ;
-    let duration = start.elapsed();
-    println!("Time elapsed in reading hint independent computation is: {:?}", duration);
     //sample random weights for each party
     let weights = sample_weights(n - 1);
 
+    //------------------------ONE TIME SETUP---------------------------------------
     let start = Instant::now();
     let (vk, ak) = setup(n, c,&params, &weights,  &all_parties_setup, &all_parties_independent_setup);
     let duration = start.elapsed();
@@ -799,7 +802,7 @@ fn main() {
 
     println!("No. of signers is {}",no_of_signers) ;
 
-    let message = "message to sign".as_bytes().to_vec();
+    let message = "dyna-hinTs".as_bytes().to_vec();
     let dst = bls::DST_ETHEREUM.as_bytes().to_vec();
 
     //let sig_vec = partial_signatures_gen(n-1, &sk, &bitmap_signer, &message, &dst) ;
@@ -839,10 +842,6 @@ fn setup(
 ) -> (VerificationKey, AggregationKey)
 {
     let mut weights = w.clone();
-   // let  sk = sk.clone();
-
-    //last element must be 0
-   // sk.push(F::from(0));
     weights.push(F::from(0));
 
     let w_of_x = utils::interpolate_poly_over_mult_subgroup(&weights);
@@ -855,9 +854,9 @@ fn setup(
     let mut pks : Vec<G1> = vec![Default::default(); n];
     let mut sk_l_of_tau_coms: Vec<G2> = vec![Default::default(); n];
     
-    let start = Instant::now();
+    //let start = Instant::now();
 
-    //verify hint
+    //verify hint parallely
 
     crossbeam::scope(|s| {
         for i in 0..all_parties_setup.len() {
@@ -868,8 +867,8 @@ fn setup(
             });
         }
     }).unwrap();
-    let duration = start.elapsed();
-    println!("time to verify hints is {:?}",duration);
+    //let duration = start.elapsed();
+    //println!("time to verify hints is {:?}",duration);
 
 
     for hint in all_parties_setup {
@@ -913,7 +912,7 @@ fn setup(
 
 }
 
-//RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q)
+//RO(SK, W, B, ParSum, Qx, Qz, Qx(τ ) · τ, Q) used to generate r 
 fn random_oracle_r(
     sk_com: G2,
     w_com: G1,
@@ -957,6 +956,7 @@ fn random_oracle_r(
     F::try_from(bi).unwrap()
 }
 
+//random oracle to compute v to batch all the quotient polynomials in to one 
 fn random_oracle_v(
     sk_com: G2,
     w_com: G1,
@@ -1004,7 +1004,7 @@ fn prove(
     signature_vector: &Vec<PartialSigDleq>,
     message: &Vec<u8>,
     dst: &Vec<u8>) -> Proof {
-    // compute the nth root of unity
+
     let n = ak.n;
 
     //adjust the weights and bitmap polynomials
@@ -1048,7 +1048,10 @@ fn prove(
     //verify the partial signatures
     partial_signatures_verification_dleq(signature_vector, message, dst, &ak.pks, params);
     // partial_signatures_verification(signature_vector, message, dst, &ak.pks, params) ;
+    let start = Instant::now() ;
     let agg_sigma = compute_agg_sig(signature_vector, n) ;
+    let end = start.elapsed() ;
+    println!("time to generate aggregated signature is {:?}",end) ;
 
     //compute all the scalars we will need in the prover
     let domain = Radix2EvaluationDomain::<F>::new(n as usize).unwrap();
@@ -1115,7 +1118,8 @@ fn prove(
     let b_sub_of_tau = KZG::commit_g1(&params, &b_sub_of_x).unwrap() ;
     let parsum_sub_of_tau_com = KZG::commit_g1(&params, &psw_sub_of_x).unwrap();
 
-//have to implemet taking v as random and computing q(x) = q1(x) + v q2(x) + v^2 q3(x) + v^3 q4(x)
+//v using random oracle and computing v,v^2,v^3, v^4 
+// to be used in computing q(x) = q1(x) + v q2(x) + v^2 q3(x) + v^3 q4(x)
 let mut v1 = random_oracle_v(
     vk.sk_of_tau_com, 
     vk.w_of_tau_com,
@@ -1237,7 +1241,7 @@ for _i in 0..4 {
     }
 }
 
-
+//verify opening of the polynomial commitments
 fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F, t: usize) {
     //adjust the w_of_x_com
     let adjustment = F::from(0) - π.agg_weight;
@@ -1296,10 +1300,10 @@ fn verify_openings_in_proof(vp: &VerificationKey, π: &Proof, r: F, t: usize) {
 }
 
 fn verify(vp: &VerificationKey, π: &Proof, t: usize, message: &Vec<u8>, dst: &Vec<u8>,vrf_instan: &mut ECVRF, vrf_message: &[u8], vrf_proof: &Vec<u8>, vrf_pk: &Vec<u8>,params: &UniversalParams<Curve>) {
-     let start = Instant::now();
+     //let start = Instant::now();
     verify_committee(vp.c, vp.n-1, π.b_committee_of_tau,vrf_instan, vrf_message, vrf_proof, vrf_pk,params) ;
-    let duration = start.elapsed();
-    println!("time to verify committee is {:?}",duration);
+    //let duration = start.elapsed();
+    //println!("time to verify committee is {:?}",duration);
 
     // compute root of unity
     let domain = Radix2EvaluationDomain::<F>::new(vp.n as usize).unwrap();
@@ -1489,6 +1493,8 @@ fn compute_psw_poly(weights: &Vec<F>, bitmap: &Vec<F>) -> DensePolynomial<F> {
     let eval_form = Evaluations::from_vec_and_domain(evals, domain);
     eval_form.interpolate()    
 }
+
+// some tests//
 #[allow(dead_code)]
 fn hint_independent_computation_test(n:usize,params: &UniversalParams<Curve>,i:usize, z_of_x: &DensePolynomial<F>)-> HintIndependentSetupElements {
 
@@ -1713,59 +1719,6 @@ fn verify_hint(params: &UniversalParams<Curve>, hint: &Hint, hint_independents: 
     assert_eq!(lhs,rhs) ;
 
 }
-// #[allow(dead_code)]
-// fn generate_hints_independent_compu_and_write (
-//     params: &UniversalParams<Curve>,
-//     n: usize,  
-//     path: &str,
-//     pps: Vec<PublicPolynomials>) -> Result<(), SerializationError> {
-//         let file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
-//         let mut writer = BufWriter::new(file);
-//         //let pps = Arc::new(pps);
-//         //let params = Arc::new(params) ;
-//         (n as u64).serialize_uncompressed(&mut writer)?;
-
-//         for i in 0..n {
-//             let temp = hint_independent_computation(n, &params, i, &pps[i]) ;
-//             temp.i.serialize_uncompressed(&mut writer)?;
-//             temp.l_i_of_tau_com_2.serialize_uncompressed(&mut writer)?;
-//             temp.qx_i_term.serialize_uncompressed(&mut writer)?;
-//             temp.qx_i_term_mul_tau.serialize_uncompressed(&mut writer)?;
-
-//             // Serialize `qz_i_terms` vector length and elements
-//             ((temp.qz_i_terms).len() as u64).serialize_uncompressed(&mut writer)?;
-//             for term in &temp.qz_i_terms {
-//                 term.serialize_uncompressed(&mut writer)?;
-//             }
-//         }
-//         writer.flush()?;
-
-//         Ok(())
-//     }
-    // #[allow(dead_code)]
-    // fn write_hints_independent_compu(
-    //     hints_independent_elements: Vec<HintIndependentSetupElements>,
-    //     path: &str,
-    // )-> Result<(),SerializationError> {
-    //     let mut file = File::create(path).map_err(|e| SerializationError::IoError(e))?;
-    //     //let mut writer = BufWriter::new(file);
-    //     (hints_independent_elements.len() as u64).serialize_uncompressed(&mut file)?;
-    //     for temp in hints_independent_elements {
-    //         temp.i.serialize_uncompressed(&mut file)?;
-    //         temp.l_i_of_tau_com_2.serialize_uncompressed(&mut file)?;
-    //         temp.qx_i_term.serialize_uncompressed(&mut file)?;
-    //         temp.qx_i_term_mul_tau.serialize_uncompressed(&mut file)?;
-
-    //         // Serialize `qz_i_terms` vector length and elements
-    //         ((temp.qz_i_terms).len() as u64).serialize_uncompressed(&mut file)?;
-    //         for term in &temp.qz_i_terms {
-    //             term.serialize_uncompressed(&mut file)?;
-    //         }
-    //     }
-
-    //     Ok(())
-
-    // }
 
 #[allow(dead_code)]
 
@@ -1804,6 +1757,96 @@ fn read_hints_independent_compu_from_file(path: &str) -> Result<Vec<HintIndepend
             
     Ok(hints_independent_compu)
 }
+
+
+//-----------------------OPTIMIZED SETUP IMPLEMENTATION-----------------------------------//
+
+//according the protocol this part should be computed by untrusted servers 
+#[allow(dead_code)]
+fn untrusted_server(params: &UniversalParams<Curve>,
+                     n: usize,
+                     z_of_x: &DensePolynomial<F>,) -> Vec<Vec<G2>> {
+    
+    let mut cross_terms = vec![] ;
+    for i in 0..n {
+        let l_i_of_x = utils::lagrange_poly(n, i) ;
+        let mut cross_terms_j = vec![] ;
+        for j in 0..n {
+            
+            let mut num: DensePolynomial<F> = utils::compute_constant_poly(&F::from(0)) ;
+        if i != j {
+            let l_j_of_x = utils::lagrange_poly(n,j);
+            num = l_j_of_x.mul(&l_i_of_x);     
+           
+        } 
+        let f = num.div(&z_of_x);
+        cross_terms_j.push(KZG::commit_g2(&params, &f).expect("commitment failed"));
+        }
+    cross_terms.push(cross_terms_j) ;
+        
+    }
+    cross_terms               
+}
+
+#[allow(dead_code)]
+fn checking_cross_terms_by_prover(params: &UniversalParams<Curve>,
+                                  n: usize,
+                                  z_of_x: &DensePolynomial<F>,) {
+                                  //cross_terms: &Vec<Vec<G2>>) {
+    let mut rng = ark_std::test_rng();
+
+    //now aggregator will verify the cross terms generated by the untrusted
+    //servers by using pairing
+     let random_number = F::rand(&mut rng) ; 
+    
+    for i in 0..n {
+
+        let mut scalars = vec![] ;
+        let mut r_power = F::from(1) ;
+
+        let l_i_of_x = utils::lagrange_poly(n, i);
+        let f = l_i_of_x.div(&z_of_x) ;
+        let l_i_tau_by_z_com = KZG::commit_g1(&params, &f).expect("commitment failed") ;
+        
+        let mut left_linear_comb = vec![] ;
+        let mut cross_terms = vec![] ;
+        for j in 0..n {
+            //untrusted server's computation 
+            //let l_i_of_x = utils::lagrange_poly(n, i) ;
+            if j!= i {
+                let l_j_of_x = utils::lagrange_poly(n,j);
+                let num = l_j_of_x.mul(&l_i_of_x);   
+                let f = num.div(&z_of_x);
+                cross_terms.push(KZG::commit_g2(&params, &f).expect("commitment failed"));
+
+                //let l_j_of_x = utils::lagrange_poly(n, j);
+                left_linear_comb.push(KZG::commit_g2(&params, &l_j_of_x).expect("commitment failed"));
+                scalars.push(r_power) ;
+                //println!("{:?}",left_linear_comb) ;
+
+            }
+            r_power *= random_number ;
+        }
+        let lhs_pippinger = <<Curve as Pairing>::G2 as VariableBaseMSM>
+           ::msm(&left_linear_comb[..], &scalars).unwrap().into_affine() ;
+        //println!("lhs pippinger {:?}",lhs_pippinger) ;
+
+        let rhs_pippinger =  <<Curve as Pairing>::G2 as VariableBaseMSM>
+           ::msm(&cross_terms[..], &scalars).unwrap().into_affine() ;
+
+           let lhs =  <Curve as Pairing>::pairing(l_i_tau_by_z_com, lhs_pippinger);
+           println!("{:}",lhs) ;
+
+           let rhs = <Curve as Pairing>::pairing(params.powers_of_g[0], rhs_pippinger);
+
+        assert_eq!(lhs,rhs) ;
+
+    }
+
+                                
+}
+
+
 
 
 
@@ -2150,6 +2193,8 @@ mod tests {
         //let _=generate_hints_independent_compu_and_write(&params, n, "setup_requirements.bin") ;
     
     }
+    // -----------------------These test functions generate hints, secret keys, lagrange coefficients for different universe sizes
+    //and store them in particular files for the code to use them 
     #[test]
     fn generate_hints_independents_32_mult() {
         let n = 32;
@@ -2617,6 +2662,16 @@ mod tests {
         println!("for {} ak, vk is {:?}",n,duration);
 
 
+    }
+
+    #[test]
+    fn testing_setup_optimization() {
+        let n = 16 ;
+        let rng = &mut test_rng() ;
+        let params = KZG::setup(n,rng).unwrap() ;
+        let z_of_x = utils::compute_vanishing_poly(n);
+        //let cross_terms = untrusted_server(&params, n, &z_of_x) ;
+        checking_cross_terms_by_prover(&params, n, &z_of_x);
     }
 
        
